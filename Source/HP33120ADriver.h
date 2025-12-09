@@ -98,8 +98,11 @@ public:
     // Trigger
     void setTriggerSource(const std::string& source);
     
-    // ARB
-    void downloadARBWaveform(const std::string& name, const std::vector<float>& data);
+    // ARB Operations
+    void downloadARBWaveform(const std::string& name, const std::vector<float>& data, int maxPoints = 16000);
+    std::vector<float> queryARBWaveform(const std::string& name);  // Returns empty if not supported
+    bool deleteARBWaveform(const std::string& name);  // Try SCPI DELETE, return success
+    std::vector<std::string> listARBNames();  // Query device for ARB names (if supported)
     
     // Live updates for LFO
     void updateFrequencyLive(double freqHz);

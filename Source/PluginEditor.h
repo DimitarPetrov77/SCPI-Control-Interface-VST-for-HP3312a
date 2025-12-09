@@ -15,7 +15,8 @@ class HP33120APluginAudioProcessorEditor  : public juce::AudioProcessorEditor,
                                             public juce::Timer,
                                             public juce::Button::Listener,
                                             public juce::ComboBox::Listener,
-                                            public juce::Slider::Listener
+                                            public juce::Slider::Listener,
+                                            public juce::FileDragAndDropTarget
 {
 public:
     HP33120APluginAudioProcessorEditor (HP33120APluginAudioProcessor&);
@@ -119,9 +120,23 @@ private:
     juce::Label syncPhaseLabel;
     juce::Slider syncPhaseSlider;
     
-    juce::Label arbNameLabel;
-    juce::ComboBox arbNameCombo;
-    juce::TextButton loadArbButton;
+    // ARB Slot UI (4 slots)
+    struct ARBSlotUI
+    {
+        juce::TextEditor nameEditor;
+        juce::Label pointsLabel;
+        juce::Slider pointsSlider;
+        juce::TextButton loadButton;
+        juce::TextButton uploadButton;
+        juce::TextButton deleteButton;
+        juce::Label statusLabel;
+        juce::Label fileNameLabel;  // Show loaded file name
+        
+        juce::Rectangle<int> bounds;  // Store bounds for drag-and-drop detection
+        int slotIndex = 0;  // 0-3
+    };
+    
+    ARBSlotUI arbSlotUIs[4];
     
     juce::Label triggerSourceLabel;
     juce::ComboBox triggerSourceCombo;
@@ -141,6 +156,15 @@ private:
     void updateDeviceParameters();
     void updateSingleParameter(juce::Slider* slider);  // Must be public or accessible
     void appendStatus(const juce::String& message);
+    
+    // ARB slot management
+    void loadAudioFileToSlot(int slotIndex);
+    void uploadSlotToDevice(int slotIndex);
+    void deleteARBFromDevice(int slotIndex);
+    
+    // Drag-and-drop
+    bool isInterestedInFileDrag(const juce::StringArray& files) override;
+    void filesDropped(const juce::StringArray& files, int x, int y) override;
     
     bool isUpdatingParameters = false;  // Prevent recursive updates
     juce::int64 lastUpdateTime = 0;  // Throttle updates

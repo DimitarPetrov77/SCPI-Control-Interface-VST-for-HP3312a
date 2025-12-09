@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "ARBManager.h"
 
 // Helper function
 static juce::String formatFrequency(double freqHz)
@@ -38,6 +39,11 @@ HP33120APluginAudioProcessor::HP33120APluginAudioProcessor()
             std::make_unique<juce::AudioParameterFloat>(Parameters::DUTY_CYCLE, "Duty Cycle", 
                 juce::NormalisableRange<float>(0.1f, 99.9f), 50.0f),
             std::make_unique<juce::AudioParameterBool>(Parameters::OUTPUT_ENABLED, "Output Enabled", false),
+            // ARB Slot Parameters (4 slots)
+            std::make_unique<juce::AudioParameterInt>(Parameters::ARB_SLOT1_POINTS, "ARB Slot 1 Points", 8, 16000, 1024),
+            std::make_unique<juce::AudioParameterInt>(Parameters::ARB_SLOT2_POINTS, "ARB Slot 2 Points", 8, 16000, 1024),
+            std::make_unique<juce::AudioParameterInt>(Parameters::ARB_SLOT3_POINTS, "ARB Slot 3 Points", 8, 16000, 1024),
+            std::make_unique<juce::AudioParameterInt>(Parameters::ARB_SLOT4_POINTS, "ARB Slot 4 Points", 8, 16000, 1024),
             // ... other params ...
         })
 {
@@ -50,6 +56,9 @@ HP33120APluginAudioProcessor::HP33120APluginAudioProcessor()
     // Start background thread for non-blocking device communication
     deviceCommandThread = std::make_unique<DeviceCommandThread>(device);
     deviceCommandThread->startThread();
+    
+    // Initialize ARB Manager
+    arbManager = std::make_unique<ARBManager>(device);
 }
 
 HP33120APluginAudioProcessor::~HP33120APluginAudioProcessor()
@@ -88,8 +97,21 @@ void HP33120APluginAudioProcessor::setCurrentProgram (int) {}
 const juce::String HP33120APluginAudioProcessor::getProgramName (int) { return {}; }
 void HP33120APluginAudioProcessor::changeProgramName (int, const juce::String&) {}
 
-void HP33120APluginAudioProcessor::prepareToPlay (double, int) {}
-void HP33120APluginAudioProcessor::releaseResources() {}
+void HP33120APluginAudioProcessor::prepareToPlay (double /*sampleRate*/, int /*samplesPerBlock*/)
+{
+    // Initialize audio format manager for WAV/MP3
+    audioFormatManager = std::make_unique<juce::AudioFormatManager>();
+    audioFormatManager->registerFormat(new juce::WavAudioFormat(), true);
+    
+    #if JUCE_USE_MP3AUDIOFORMAT
+    audioFormatManager->registerFormat(new juce::MP3AudioFormat(), false);
+    #endif
+}
+
+void HP33120APluginAudioProcessor::releaseResources()
+{
+    audioFormatManager = nullptr;
+}
 
 bool HP33120APluginAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
@@ -174,7 +196,27 @@ void HP33120APluginAudioProcessor::handleMIDI(const juce::MidiBuffer& midiMessag
 }
 
 // Device connection wrappers
-bool HP33120APluginAudioProcessor::connectDevice(const std::string& resourceName) { return device.connect(resourceName); }
+bool HP33120APluginAudioProcessor::connectDevice(const std::string& resourceName)
+{
+    if (device.connect(resourceName))
+    {
+        // Sync ARBs from device on successful connection
+        // Note: HP33120A doesn't support querying ARB names, so sync just resets state
+        if (arbManager)
+        {
+            try
+            {
+                arbManager->syncFromDevice();
+            }
+            catch (...)
+            {
+                // Ignore any exceptions from sync - device doesn't support ARB queries
+            }
+        }
+        return true;
+    }
+    return false;
+}
 void HP33120APluginAudioProcessor::disconnectDevice() { device.disconnect(); }
 std::string HP33120APluginAudioProcessor::getDeviceIDN() { return device.queryIDN(); }
 

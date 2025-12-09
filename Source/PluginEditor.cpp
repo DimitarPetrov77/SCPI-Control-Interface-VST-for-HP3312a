@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "ARBManager.h"
 #include <cmath>
 #include <algorithm>
 
@@ -79,8 +80,8 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
     setResizable(true, true);
-    setResizeLimits(800, 600, 1600, 2000);
-    setSize (900, 1000);
+    setResizeLimits(1000, 600, 2000, 1200);
+    setSize (1200, 800);  // Wider but shorter
     startTimer(100);  // Update UI every 100ms
     
     // Connection UI
@@ -451,19 +452,50 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     syncPhaseSlider.addListener(this);
     addAndMakeVisible(&syncPhaseSlider);
     
-    arbNameLabel.setText("ARB Name:", juce::dontSendNotification);
-    addAndMakeVisible(&arbNameLabel);
-    arbNameCombo.addItem("MYARB", 1);
-    arbNameCombo.addItem("USER", 2);
-    arbNameCombo.addItem("VOLATILE", 3);
-    arbNameCombo.setEditableText(true);
-    arbNameCombo.setSelectedId(1);
-    arbNameCombo.addListener(this);
-    addAndMakeVisible(&arbNameCombo);
-    
-    loadArbButton.setButtonText("Load ARB File");
-    loadArbButton.addListener(this);
-    addAndMakeVisible(&loadArbButton);
+    // Initialize 4 ARB slots
+    const char* defaultNames[] = {"MYARB", "USER", "VOLATILE", "CUSTOM"};
+    for (int i = 0; i < 4; ++i)
+    {
+        arbSlotUIs[i].slotIndex = i;
+        
+        arbSlotUIs[i].nameEditor.setText(defaultNames[i], juce::dontSendNotification);
+        arbSlotUIs[i].nameEditor.setMultiLine(false);
+        arbSlotUIs[i].nameEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colours::darkgrey);
+        addAndMakeVisible(&arbSlotUIs[i].nameEditor);
+        
+        arbSlotUIs[i].pointsLabel.setText("Points:", juce::dontSendNotification);
+        addAndMakeVisible(&arbSlotUIs[i].pointsLabel);
+        
+        arbSlotUIs[i].pointsSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+        arbSlotUIs[i].pointsSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 100, 25);
+        arbSlotUIs[i].pointsSlider.setRange(8.0, 16000.0, 1.0);
+        arbSlotUIs[i].pointsSlider.setValue(1024.0);
+        arbSlotUIs[i].pointsSlider.setTextValueSuffix(" pts");
+        arbSlotUIs[i].pointsSlider.setNumDecimalPlacesToDisplay(0);
+        arbSlotUIs[i].pointsSlider.setTextBoxIsEditable(true);
+        arbSlotUIs[i].pointsSlider.addListener(this);
+        addAndMakeVisible(&arbSlotUIs[i].pointsSlider);
+        
+        arbSlotUIs[i].loadButton.setButtonText("Load File");
+        arbSlotUIs[i].loadButton.addListener(this);
+        addAndMakeVisible(&arbSlotUIs[i].loadButton);
+        
+        arbSlotUIs[i].uploadButton.setButtonText("Upload");
+        arbSlotUIs[i].uploadButton.addListener(this);
+        addAndMakeVisible(&arbSlotUIs[i].uploadButton);
+        
+        arbSlotUIs[i].deleteButton.setButtonText("Delete");
+        arbSlotUIs[i].deleteButton.addListener(this);
+        addAndMakeVisible(&arbSlotUIs[i].deleteButton);
+        
+        arbSlotUIs[i].statusLabel.setText("Ready", juce::dontSendNotification);
+        arbSlotUIs[i].statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
+        addAndMakeVisible(&arbSlotUIs[i].statusLabel);
+        
+        arbSlotUIs[i].fileNameLabel.setText("No file loaded", juce::dontSendNotification);
+        arbSlotUIs[i].fileNameLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        addAndMakeVisible(&arbSlotUIs[i].fileNameLabel);
+    }
     
     triggerSourceLabel.setText("Trigger Source:", juce::dontSendNotification);
     addAndMakeVisible(&triggerSourceLabel);
@@ -513,6 +545,16 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
         audioProcessor.parameters, Parameters::WAVEFORM, waveformCombo));
     buttonAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.parameters, Parameters::OUTPUT_ENABLED, outputToggle));
+    
+    // ARB Slot parameter attachments
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::ARB_SLOT1_POINTS, arbSlotUIs[0].pointsSlider));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::ARB_SLOT2_POINTS, arbSlotUIs[1].pointsSlider));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::ARB_SLOT3_POINTS, arbSlotUIs[2].pointsSlider));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::ARB_SLOT4_POINTS, arbSlotUIs[3].pointsSlider));
 }
 
 HP33120APluginAudioProcessorEditor::~HP33120APluginAudioProcessorEditor()
@@ -639,8 +681,9 @@ void HP33120APluginAudioProcessorEditor::resized()
     
     area.removeFromTop(groupSpacing);
     
-    // Advanced
-    int advHeight = rowHeight * 6 + spacing * 5 + 20;
+    // Advanced (includes 4 ARB slots: each takes rowHeight * 2 + spacing)
+    int arbSlotsHeight = 4 * (rowHeight * 2 + spacing) + spacing;  // 4 slots + spacing between
+    int advHeight = rowHeight * 6 + spacing * 5 + 20 + arbSlotsHeight;
     advGroup.setBounds(area.removeFromTop(advHeight));
     auto advArea = advGroup.getBounds().reduced(10, 25);
     
@@ -678,12 +721,30 @@ void HP33120APluginAudioProcessorEditor::resized()
     syncPhaseSlider.setBounds(syncRow.reduced(2));
     advArea.removeFromTop(spacing);
     
-    auto arbRow = advArea.removeFromTop(rowHeight);
-    arbNameLabel.setBounds(arbRow.removeFromLeft(labelWidth).reduced(2));
-    arbNameCombo.setBounds(arbRow.removeFromLeft(controlWidth).reduced(2));
-    loadArbButton.setBounds(arbRow.removeFromLeft(120).reduced(2));
-    triggerSourceLabel.setBounds(arbRow.removeFromLeft(labelWidth).reduced(2));
-    triggerSourceCombo.setBounds(arbRow.reduced(2));
+    // ARB Slots (4 slots in vertical layout)
+    int arbSlotHeight = rowHeight * 2 + spacing;
+    for (int i = 0; i < 4; ++i)
+    {
+        auto slotArea = advArea.removeFromTop(arbSlotHeight);
+        arbSlotUIs[i].bounds = slotArea;  // Store bounds for drag-and-drop detection
+        auto slotRow1 = slotArea.removeFromTop(rowHeight);
+        arbSlotUIs[i].nameEditor.setBounds(slotRow1.removeFromLeft(120).reduced(2));
+        arbSlotUIs[i].pointsLabel.setBounds(slotRow1.removeFromLeft(60).reduced(2));
+        arbSlotUIs[i].pointsSlider.setBounds(slotRow1.removeFromLeft(200).reduced(2));
+        arbSlotUIs[i].loadButton.setBounds(slotRow1.removeFromLeft(100).reduced(2));
+        arbSlotUIs[i].uploadButton.setBounds(slotRow1.removeFromLeft(80).reduced(2));
+        arbSlotUIs[i].deleteButton.setBounds(slotRow1.removeFromLeft(80).reduced(2));
+        
+        auto slotRow2 = slotArea.removeFromTop(rowHeight);
+        arbSlotUIs[i].fileNameLabel.setBounds(slotRow2.removeFromLeft(300).reduced(2));
+        arbSlotUIs[i].statusLabel.setBounds(slotRow2.reduced(2));
+        
+        advArea.removeFromTop(spacing);
+    }
+    
+    auto triggerRow = advArea.removeFromTop(rowHeight);
+    triggerSourceLabel.setBounds(triggerRow.removeFromLeft(labelWidth).reduced(2));
+    triggerSourceCombo.setBounds(triggerRow.reduced(2));
     
     area.removeFromTop(groupSpacing);
     statusBox.setBounds(area.reduced(2));
@@ -766,7 +827,30 @@ void HP33120APluginAudioProcessorEditor::buttonClicked(juce::Button* button)
         audioProcessor.disconnectDevice();
         appendStatus("Disconnected");
     }
-    else if (button == &loadArbButton)
+    // Check ARB slot buttons
+    for (int i = 0; i < 4; ++i)
+    {
+        if (button == &arbSlotUIs[i].loadButton)
+        {
+            loadAudioFileToSlot(i);
+            return;
+        }
+        else if (button == &arbSlotUIs[i].uploadButton)
+        {
+            uploadSlotToDevice(i);
+            return;
+        }
+        else if (button == &arbSlotUIs[i].deleteButton)
+        {
+            deleteARBFromDevice(i);
+            return;
+        }
+    }
+    
+    // Legacy ARB button removed - use slot buttons instead
+    
+    // Other buttons...
+    if (false)  // Placeholder for other button handlers
     {
         auto chooser = std::make_unique<juce::FileChooser>("Select ARB file", juce::File(), "*.txt;*.csv");
         auto chooserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
@@ -935,12 +1019,222 @@ void HP33120APluginAudioProcessorEditor::sliderValueChanged(juce::Slider* slider
         }
     }
     
+    // Handle ARB point count sliders
+    for (int i = 0; i < 4; ++i)
+    {
+        if (slider == &arbSlotUIs[i].pointsSlider)
+        {
+            if (audioProcessor.arbManager)
+            {
+                int pointCount = (int)slider->getValue();
+                audioProcessor.arbManager->setSlotPointCount(i, pointCount);
+                arbSlotUIs[i].statusLabel.setText("Point count: " + juce::String(pointCount), juce::dontSendNotification);
+                arbSlotUIs[i].statusLabel.setColour(juce::Label::textColourId, juce::Colours::lightblue);
+            }
+            return;
+        }
+    }
+    
     updateSingleParameter(slider);
 }
 
 void HP33120APluginAudioProcessorEditor::updateDeviceParameters()
 {
     // Full sync implementation omitted for brevity, single param update is primary
+}
+
+// ARB Slot Management Functions
+void HP33120APluginAudioProcessorEditor::loadAudioFileToSlot(int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= 4) return;
+    
+    auto chooser = std::make_unique<juce::FileChooser>("Select Audio File (WAV/MP3)", juce::File(), "*.wav;*.mp3;*.WAV;*.MP3");
+    auto chooserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
+    
+    chooser->launchAsync(chooserFlags, [this, slotIndex](const juce::FileChooser& fc)
+    {
+        try
+        {
+            auto file = fc.getResult();
+            if (file.exists())
+            {
+                if (audioProcessor.arbManager && audioProcessor.audioFormatManager)
+                {
+                    bool success = audioProcessor.arbManager->loadAudioFile(slotIndex, file, *(audioProcessor.audioFormatManager.get()));
+                    if (success)
+                    {
+                        arbSlotUIs[slotIndex].fileNameLabel.setText(file.getFileName(), juce::dontSendNotification);
+                        arbSlotUIs[slotIndex].statusLabel.setText("Loaded", juce::dontSendNotification);
+                        arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::green);
+                        appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Loaded " + file.getFileName());
+                    }
+                    else
+                    {
+                        arbSlotUIs[slotIndex].statusLabel.setText("Load Failed", juce::dontSendNotification);
+                        arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+                        appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Failed to load " + file.getFileName());
+                    }
+                }
+            }
+        }
+        catch (const std::exception& e)
+        {
+            arbSlotUIs[slotIndex].statusLabel.setText("Error", juce::dontSendNotification);
+            arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+            appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Exception - " + juce::String(e.what()));
+        }
+        catch (...)
+        {
+            arbSlotUIs[slotIndex].statusLabel.setText("Error", juce::dontSendNotification);
+            arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+            appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Unknown error loading file");
+        }
+    });
+    chooser.release();
+}
+
+void HP33120APluginAudioProcessorEditor::uploadSlotToDevice(int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= 4) return;
+    if (!audioProcessor.arbManager) return;
+    
+    try
+    {
+        // Update slot name from editor
+        juce::String slotName = arbSlotUIs[slotIndex].nameEditor.getText();
+        if (slotName.isEmpty()) slotName = "MYARB";
+        
+        auto& slot = audioProcessor.arbManager->getSlot(slotIndex);
+        {
+            juce::ScopedLock sl(slot.lock);
+            slot.name = slotName;
+        }
+        
+        // Update point count from parameter
+        int pointCount = (int)audioProcessor.parameters.getRawParameterValue(
+            slotIndex == 0 ? Parameters::ARB_SLOT1_POINTS :
+            slotIndex == 1 ? Parameters::ARB_SLOT2_POINTS :
+            slotIndex == 2 ? Parameters::ARB_SLOT3_POINTS :
+            Parameters::ARB_SLOT4_POINTS
+        )->load();
+        
+        audioProcessor.arbManager->setSlotPointCount(slotIndex, pointCount);
+        
+        // Set status to "Uploading..." immediately
+        arbSlotUIs[slotIndex].statusLabel.setText("Uploading...", juce::dontSendNotification);
+        arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::orange);
+        appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Starting upload...");
+        
+        // Use async upload to prevent UI freezing
+        audioProcessor.arbManager->uploadSlotToDeviceAsync(slotIndex, 
+            [this, slotIndex](int idx, bool success, const juce::String& message)
+            {
+                // This callback runs on the message thread, safe to update UI
+                if (success)
+                {
+                    arbSlotUIs[idx].statusLabel.setText("Uploaded", juce::dontSendNotification);
+                    arbSlotUIs[idx].statusLabel.setColour(juce::Label::textColourId, juce::Colours::green);
+                    appendStatus("ARB Slot " + juce::String(idx + 1) + ": " + message);
+                }
+                else
+                {
+                    arbSlotUIs[idx].statusLabel.setText("Upload Failed", juce::dontSendNotification);
+                    arbSlotUIs[idx].statusLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+                    appendStatus("ARB Slot " + juce::String(idx + 1) + ": " + message);
+                }
+            });
+    }
+    catch (const std::exception& e)
+    {
+        arbSlotUIs[slotIndex].statusLabel.setText("Error", juce::dontSendNotification);
+        arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+        appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Exception - " + juce::String(e.what()));
+    }
+    catch (...)
+    {
+        arbSlotUIs[slotIndex].statusLabel.setText("Error", juce::dontSendNotification);
+        arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+        appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Unknown error during upload");
+    }
+}
+
+void HP33120APluginAudioProcessorEditor::deleteARBFromDevice(int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= 4) return;
+    if (!audioProcessor.arbManager) return;
+    
+    juce::String slotName = arbSlotUIs[slotIndex].nameEditor.getText();
+    if (slotName.isEmpty()) slotName = "MYARB";
+    
+    bool success = audioProcessor.arbManager->deleteARBFromDevice(slotName);
+    if (success)
+    {
+        arbSlotUIs[slotIndex].statusLabel.setText("Deleted", juce::dontSendNotification);
+        arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::orange);
+        appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Deleted from device");
+    }
+    else
+    {
+        arbSlotUIs[slotIndex].statusLabel.setText("Delete Failed", juce::dontSendNotification);
+        arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+        appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Delete failed");
+    }
+}
+
+// Drag-and-drop implementation
+bool HP33120APluginAudioProcessorEditor::isInterestedInFileDrag(const juce::StringArray& files)
+{
+    for (const auto& file : files)
+    {
+        juce::File f(file);
+        juce::String ext = f.getFileExtension().toLowerCase();
+        if (ext == ".wav" || ext == ".mp3")
+            return true;
+    }
+    return false;
+}
+
+void HP33120APluginAudioProcessorEditor::filesDropped(const juce::StringArray& files, int x, int y)
+{
+    if (files.isEmpty()) return;
+    
+    juce::File file(files[0]);
+    if (!file.exists()) return;
+    
+    juce::String ext = file.getFileExtension().toLowerCase();
+    if (ext != ".wav" && ext != ".mp3") return;
+    
+    // Determine which slot based on drop coordinates
+    int slotIndex = -1;
+    for (int i = 0; i < 4; ++i)
+    {
+        if (arbSlotUIs[i].bounds.contains(x, y))
+        {
+            slotIndex = i;
+            break;
+        }
+    }
+    
+    // If no specific slot found, use slot 0
+    if (slotIndex < 0) slotIndex = 0;
+    
+    // Load the file
+    if (audioProcessor.arbManager && audioProcessor.audioFormatManager)
+    {
+        bool success = audioProcessor.arbManager->loadAudioFile(slotIndex, file, *(audioProcessor.audioFormatManager.get()));
+        if (success)
+        {
+            arbSlotUIs[slotIndex].fileNameLabel.setText(file.getFileName(), juce::dontSendNotification);
+            arbSlotUIs[slotIndex].statusLabel.setText("Loaded", juce::dontSendNotification);
+            arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::green);
+            appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Loaded " + file.getFileName() + " (drag & drop)");
+        }
+        else
+        {
+            arbSlotUIs[slotIndex].statusLabel.setText("Load Failed", juce::dontSendNotification);
+            arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+        }
+    }
 }
 
 void HP33120APluginAudioProcessorEditor::appendStatus(const juce::String& message)

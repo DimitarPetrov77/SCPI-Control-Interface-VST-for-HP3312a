@@ -43,6 +43,8 @@ target_sources(HP33120A_VST PRIVATE
     Source/PluginEditor.h
     Source/HP33120ADriver.cpp
     Source/HP33120ADriver.h
+    Source/ARBManager.cpp
+    Source/ARBManager.h
     Source/Parameters.h
 )
 

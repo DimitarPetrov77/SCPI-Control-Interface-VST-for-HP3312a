@@ -54,7 +54,14 @@ namespace Parameters
     // Trigger Settings
     constexpr const char* TRIGGER_SOURCE = "Trigger Source";
     
-    // ARB Settings
-    constexpr const char* ARB_NAME = "ARB Name";
+    // ARB Slot Parameters (4 slots)
+    constexpr const char* ARB_SLOT1_NAME = "ARB Slot 1 Name";
+    constexpr const char* ARB_SLOT1_POINTS = "ARB Slot 1 Points";
+    constexpr const char* ARB_SLOT2_NAME = "ARB Slot 2 Name";
+    constexpr const char* ARB_SLOT2_POINTS = "ARB Slot 2 Points";
+    constexpr const char* ARB_SLOT3_NAME = "ARB Slot 3 Name";
+    constexpr const char* ARB_SLOT3_POINTS = "ARB Slot 3 Points";
+    constexpr const char* ARB_SLOT4_NAME = "ARB Slot 4 Name";
+    constexpr const char* ARB_SLOT4_POINTS = "ARB Slot 4 Points";
 }
 

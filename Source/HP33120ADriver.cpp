@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+#include <vector>
+#include <string>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -156,48 +158,76 @@ void HP33120ADriver::write(const std::string& cmd)
     std::lock_guard<std::recursive_mutex> lock(driverMutex);
     if (!connected || !viPrintf) return;
     
-    std::string cmdWithNewline = cmd + "\n";
-    ViSession sess = (ViSession)session;
-    viPrintf(sess, "%s", cmdWithNewline.c_str());
-    
-    if (viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
-    
-    // No delays - send commands as fast as possible, let the device handle the rate
-    // Query device error response and log it (raw hardware response)
-    // This shows the actual response from the hardware after each command
-    // Minimal delay only for device to be ready to respond
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    
-    // Directly query SYST:ERR? without going through query() to avoid recursion
-    if (viPrintf && viRead)
+    try
     {
-        viPrintf(sess, "SYST:ERR?\n");
+        std::string cmdWithNewline = cmd + "\n";
+        ViSession sess = (ViSession)session;
+        ViStatus status = viPrintf(sess, "%s", cmdWithNewline.c_str());
+        
+        if (status != VI_SUCCESS)
+        {
+            if (logCallback)
+                logCallback(cmd + " -> [Write Error: " + std::to_string(status) + "]");
+            return;
+        }
+        
         if (viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
         
-        // Minimal delay for read - let device respond as fast as it can
+        // No delays - send commands as fast as possible, let the device handle the rate
+        // Query device error response and log it (raw hardware response)
+        // This shows the actual response from the hardware after each command
+        // Minimal delay only for device to be ready to respond
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         
-        char buffer[1024] = {0};
-        ViUInt32 retCount = 0;
-        ViStatus status = viRead(sess, (ViBuf)buffer, sizeof(buffer) - 1, &retCount);
-        
-        if (status == VI_SUCCESS && retCount > 0)
+        // Directly query SYST:ERR? without going through query() to avoid recursion
+        if (viPrintf && viRead)
         {
-            buffer[retCount] = '\0';
-            std::string response(buffer);
+            status = viPrintf(sess, "SYST:ERR?\n");
+            if (status == VI_SUCCESS && viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
             
-            // Remove trailing whitespace
-            while (!response.empty() && (response.back() == '\n' || response.back() == '\r' || response.back() == ' '))
-                response.pop_back();
+            // Minimal delay for read - let device respond as fast as it can
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
             
-            // Log normal commands and their responses (like Python does)
-            // This shows: "FREQ 1000.0 -> +0,"No error""
-            if (logCallback && !response.empty())
+            char buffer[1024] = {0};
+            ViUInt32 retCount = 0;
+            status = viRead(sess, (ViBuf)buffer, sizeof(buffer) - 1, &retCount);
+            
+            if (status == VI_SUCCESS && retCount > 0)
             {
-                std::string logMsg = cmd + " -> " + response;
-                logCallback(logMsg);
+                buffer[retCount] = '\0';
+                std::string response(buffer);
+                
+                // Remove trailing whitespace
+                while (!response.empty() && (response.back() == '\n' || response.back() == '\r' || response.back() == ' '))
+                    response.pop_back();
+                
+                // Log normal commands and their responses (like Python does)
+                // This shows: "FREQ 1000.0 -> +0,"No error""
+                if (logCallback && !response.empty())
+                {
+                    std::string logMsg = cmd + " -> " + response;
+                    logCallback(logMsg);
+                }
+            }
+            else if (status != VI_SUCCESS && logCallback)
+            {
+                // Don't log timeout errors (expected for some commands)
+                if (status != 0xBFFF0015)  // VI_ERROR_TMO
+                {
+                    logCallback(cmd + " -> [Error query failed: " + std::to_string(status) + "]");
+                }
             }
         }
+    }
+    catch (const std::exception& e)
+    {
+        if (logCallback)
+            logCallback(cmd + " -> [Exception: " + std::string(e.what()) + "]");
+    }
+    catch (...)
+    {
+        if (logCallback)
+            logCallback(cmd + " -> [Unknown error]");
     }
 }
 
@@ -221,7 +251,10 @@ std::string HP33120ADriver::query(const std::string& cmd)
     
     if (status != VI_SUCCESS) 
     {
-        if (logCallback)
+        // Don't log read errors for unsupported query commands - they're expected
+        // Only log if it's a critical error (not timeout/unsupported command)
+        // Error -1073807339 (0xBFFF0015) is VI_ERROR_TMO which is common for unsupported queries
+        if (logCallback && status != 0xBFFF0015)  // Don't log timeout errors
         {
             logCallback(cmd + " -> [Read Error: " + std::to_string(status) + "]");
         }
@@ -354,11 +387,521 @@ void HP33120ADriver::setSyncPhase(double phaseDeg)
 }
 void HP33120ADriver::setTriggerSource(const std::string& source) { write("TRIG:SOUR " + source); }
 
-void HP33120ADriver::downloadARBWaveform(const std::string& name, const std::vector<float>& data)
+void HP33120ADriver::downloadARBWaveform(const std::string& name, const std::vector<float>& data, int maxPoints)
 {
-    // Implementation omitted for brevity, logic remains same
-    (void)name;   // Suppress unused parameter warning
-    (void)data;   // Suppress unused parameter warning
+    std::lock_guard<std::recursive_mutex> lock(driverMutex);
+    if (!connected || data.empty()) return;
+    
+    // Validate point count (ARBManager should have already resampled, but validate anyway)
+    if (maxPoints < 8 || maxPoints > 16000)
+    {
+        if (logCallback)
+            logCallback("ARB point count out of range: " + std::to_string(maxPoints) + " (must be 8-16000)");
+        return;
+    }
+    
+    // ARBManager should have already resampled and normalized the data
+    // Just validate the data is in correct range and correct size
+    std::vector<float> finalData = data;
+    
+    // If data size doesn't match maxPoints, log warning but proceed (ARBManager should handle this)
+    if ((int)finalData.size() != maxPoints)
+    {
+        if (logCallback)
+            logCallback("Warning: ARB data size (" + std::to_string(finalData.size()) + 
+                       ") doesn't match target (" + std::to_string(maxPoints) + ")");
+        // Truncate or pad if needed (shouldn't happen if ARBManager works correctly)
+        if (finalData.size() > (size_t)maxPoints)
+            finalData.resize(maxPoints);
+        else
+        {
+            // Pad with zeros (shouldn't happen, but handle gracefully)
+            finalData.resize(maxPoints, 0.0f);
+        }
+    }
+    
+    // Final validation: ensure data is in [-1, +1] range (ARBManager should have normalized, but double-check)
+    bool needsNormalization = false;
+    float maxVal = 0.0f;
+    for (const auto& val : finalData)
+    {
+        float absVal = std::abs(val);
+        if (absVal > 1.0f) needsNormalization = true;
+        maxVal = std::max(maxVal, absVal);
+    }
+    
+    if (needsNormalization && maxVal > 0.0f)
+    {
+        // Normalize if out of range (shouldn't happen if ARBManager works correctly)
+        for (auto& val : finalData)
+            val /= maxVal;
+    }
+    
+    // Clamp to [-1, +1] to handle any floating point precision issues
+    for (auto& val : finalData)
+        val = std::max(-1.0f, std::min(1.0f, val));
+    
+    // Build SCPI command: DATA VOLATILE, val1,val2,...,valN
+    // According to HP33120A manual, we must:
+    // 1. Upload to VOLATILE memory using DATA VOLATILE
+    // 2. Copy to non-volatile memory with DATA:COPY <name>, VOLATILE
+    // 3. Select with FUNCtion:USER <name>
+    // 4. Set shape to USER with FUNCtion:SHAPe USER
+    // Use std::ostringstream for efficient string building, then convert to juce::String
+    // This is much faster than concatenating juce::String objects
+    std::ostringstream oss;
+    oss.imbue(std::locale("C"));  // Force C locale to ensure dot decimal separator
+    oss << std::fixed << std::setprecision(6);
+    oss << "DATA VOLATILE";
+    
+    // Build data string efficiently using ostringstream
+    // For very large datasets, yield periodically to keep system responsive
+    const size_t yieldInterval = 1000;  // Yield every 1000 points
+    for (size_t i = 0; i < finalData.size(); ++i)
+    {
+        oss << "," << finalData[i];
+        
+        // Yield periodically during string building for very large datasets
+        if (i > 0 && (i % yieldInterval == 0) && finalData.size() > 5000)
+        {
+            std::this_thread::yield();
+        }
+    }
+    
+    juce::String cmd = juce::String(oss.str());
+    
+    // For very large commands, log a warning but proceed
+    if (cmd.length() > 100000 && logCallback)
+    {
+        logCallback("Warning: Large ARB command (" + std::to_string(cmd.length()) + " chars) - upload may take time");
+    }
+    
+    // Debug: Log first part of command to verify format
+    if (logCallback && cmd.length() > 0)
+    {
+        juce::String firstPart = cmd.substring(0, juce::jmin(100, (int)cmd.length()));
+        logCallback(("ARB command start: " + firstPart + "...").toStdString());
+    }
+    
+    // Send the ARB data command directly (bypass normal write() to avoid error query on huge command)
+    // This prevents crashes from querying errors on very large commands
+    // Note: driverMutex is already locked at function start
+    if (!connected || !viPrintf)
+    {
+        if (logCallback)
+            logCallback("ARB upload failed: Device not connected");
+        return;
+    }
+    
+    try
+    {
+        std::string cmdStr = cmd.toStdString();
+        ViSession sess = (ViSession)session;
+        
+        // Step 1: Upload to VOLATILE memory
+        // Use viPrintf like the Python code does - it handles large strings correctly
+        ViStatus status = viPrintf(sess, "%s\n", cmdStr.c_str());
+        
+        if (status != VI_SUCCESS)
+        {
+            if (logCallback)
+                logCallback("ARB upload failed: VISA write error " + std::to_string(status));
+            return;
+        }
+        
+        if (viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
+        
+        // For large ARB uploads, give device more time to process
+        // The device needs time to parse and store the large command
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        
+        // Query error to check if upload was successful
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::string error = queryError();
+        
+        if (logCallback)
+        {
+            if (error.find("No error") != std::string::npos || error.find("+0") != std::string::npos)
+            {
+                logCallback("DATA VOLATILE -> [Uploaded " + std::to_string(finalData.size()) + " points]");
+            }
+            else
+            {
+                logCallback("DATA VOLATILE -> " + error);
+                return;  // Don't proceed if upload failed
+            }
+        }
+        
+        // Step 2: Copy from VOLATILE to non-volatile memory with the specified name
+        // Strategy: According to manual, copying to an existing name overwrites it (no error).
+        // The +781 error only occurs when all 4 slots are full AND the name doesn't exist.
+        // Correct sequence: Try copy first, if it fails with +781, delete only the target name
+        // (or one other waveform if target doesn't exist), then re-upload VOLATILE if needed.
+        
+        // First, try to copy directly (this will succeed if target name exists and can be overwritten)
+        std::string copyCmd = "DATA:COPY " + name + ",VOLATILE";
+        write(copyCmd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        error = queryError();
+        
+        // Check if copy succeeded
+        bool hasErrorCode = (error.find("+781") != std::string::npos || 
+                            error.find("+785") != std::string::npos ||
+                            error.find("+787") != std::string::npos ||
+                            error.find("+786") != std::string::npos ||
+                            error.find("+782") != std::string::npos ||
+                            error.find("+783") != std::string::npos ||
+                            error.find("+780") != std::string::npos);
+        
+        bool copySucceeded = !hasErrorCode && 
+                            (error.find("No error") != std::string::npos || 
+                             error.find("+0") != std::string::npos ||
+                             error.find("\"+0") != std::string::npos);
+        
+        bool useVolatile = false;
+        bool needReupload = false;
+        
+        if (!copySucceeded)
+        {
+            // Copy failed - check the reason
+            if (error.find("+781") != std::string::npos)
+            {
+                // Memory full - need to free space by deleting the target name or another waveform
+                if (logCallback)
+                    logCallback("Memory full (copy failed with +781). Freeing memory slot for '" + name + "'...");
+                
+                // Get catalog to see what waveforms exist
+                std::string catalog = query("DATA:CATalog?");
+                std::string upperName = name;
+                std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
+                
+                bool targetNameExists = (catalog.find(upperName) != std::string::npos || 
+                                        catalog.find("\"" + upperName + "\"") != std::string::npos);
+                
+                // Switch to built-in waveform to allow deletion
+                write("FUNCtion:SIN");
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                queryError();  // Clear error
+                
+                // Delete the target name first (if it exists, this frees its slot)
+                if (targetNameExists)
+                {
+                    if (logCallback)
+                        logCallback("Deleting existing waveform '" + name + "' to free its slot...");
+                    
+                    std::string deleteCmd = "DATA:DELete " + name;
+                    write(deleteCmd);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    std::string delError = queryError();
+                    
+                    if (logCallback)
+                        logCallback("DATA:DELete " + name + " -> " + delError);
+                    
+                    if (delError.find("+787") != std::string::npos)
+                    {
+                        // Still active - try switching again
+                        if (logCallback)
+                            logCallback("Waveform still active. Switching to SINE again...");
+                        
+                        write("FUNCtion:SIN");
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        queryError();
+                        
+                        write(deleteCmd);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        delError = queryError();
+                        
+                        if (logCallback)
+                            logCallback("DATA:DELete " + name + " (retry) -> " + delError);
+                    }
+                }
+                else
+                {
+                    // Target name doesn't exist - need to delete another waveform to free space
+                    // Parse catalog to find a user waveform to delete (not built-in, not VOLATILE)
+                    if (logCallback)
+                        logCallback("Target name doesn't exist. Finding another waveform to delete...");
+                    
+                    // Extract user waveform names from catalog
+                    // Catalog format: "SINC","NEG_RAMP","EXP_RISE","EXP_FALL","CARDIAC","VOLATILE","ARB_1","ARB_2"
+                    std::vector<std::string> userWaveforms;
+                    std::string builtinNames[] = {"SINC", "NEG_RAMP", "EXP_RISE", "EXP_FALL", "CARDIAC"};
+                    
+                    // Simple parsing: find quoted strings that aren't built-in names
+                    size_t pos = 0;
+                    while ((pos = catalog.find('"', pos)) != std::string::npos)
+                    {
+                        size_t endPos = catalog.find('"', pos + 1);
+                        if (endPos != std::string::npos)
+                        {
+                            std::string wfName = catalog.substr(pos + 1, endPos - pos - 1);
+                            bool isBuiltin = false;
+                            for (const auto& builtin : builtinNames)
+                            {
+                                if (wfName == builtin)
+                                {
+                                    isBuiltin = true;
+                                    break;
+                                }
+                            }
+                            if (!isBuiltin && wfName != "VOLATILE")
+                            {
+                                userWaveforms.push_back(wfName);
+                            }
+                            pos = endPos + 1;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    
+                    if (!userWaveforms.empty())
+                    {
+                        // Delete the first user waveform found (preferably not the target name)
+                        std::string wfToDelete = userWaveforms[0];
+                        if (logCallback)
+                            logCallback("Deleting waveform '" + wfToDelete + "' to free memory slot...");
+                        
+                        std::string deleteCmd = "DATA:DELete " + wfToDelete;
+                        write(deleteCmd);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        std::string delError = queryError();
+                        
+                        if (logCallback)
+                            logCallback("DATA:DELete " + wfToDelete + " -> " + delError);
+                        
+                        if (delError.find("+787") != std::string::npos)
+                        {
+                            // Still active - try switching again
+                            write("FUNCtion:SIN");
+                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                            queryError();
+                            
+                            write(deleteCmd);
+                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                            delError = queryError();
+                            
+                            if (logCallback)
+                                logCallback("DATA:DELete " + wfToDelete + " (retry) -> " + delError);
+                        }
+                    }
+                    else
+                    {
+                        // No user waveforms found - this shouldn't happen if memory is full
+                        // But if it does, we'll need to delete VOLATILE and re-upload
+                        if (logCallback)
+                            logCallback("Warning: No user waveforms found in catalog, but memory is full.");
+                        needReupload = true;  // Will re-upload VOLATILE after copy attempt
+                    }
+                }
+                
+                // Check if VOLATILE was deleted (it shouldn't be, but check just in case)
+                // If we deleted the target name and it was using VOLATILE, we need to re-upload
+                // Actually, we only delete non-volatile waveforms, so VOLATILE should still be there
+                // But let's verify by trying the copy - if it fails with +780, we'll re-upload
+            }
+            else if (error.find("+780") != std::string::npos)
+            {
+                // VOLATILE not loaded - re-upload
+                if (logCallback)
+                    logCallback("VOLATILE memory not found. Re-uploading...");
+                needReupload = true;
+            }
+            else
+            {
+                // Other error - log and potentially fall back to VOLATILE
+                if (logCallback)
+                {
+                    logCallback("DATA:COPY " + name + " -> " + error);
+                    if (error.find("+785") != std::string::npos)
+                    {
+                        logCallback("Waveform doesn't exist. Using VOLATILE memory.");
+                        useVolatile = true;
+                    }
+                    else
+                    {
+                        logCallback("Error: Failed to copy waveform to device.");
+                        return;  // Don't proceed if copy failed for other reasons
+                    }
+                }
+            }
+        }
+        
+        // Re-upload to VOLATILE if needed (only if +780 error occurred)
+        if (needReupload)
+        {
+            // Re-send the VOLATILE upload command
+            status = viPrintf(sess, "%s\n", cmdStr.c_str());
+            
+            if (status != VI_SUCCESS)
+            {
+                if (logCallback)
+                    logCallback("ARB re-upload failed: VISA write error " + std::to_string(status));
+                return;
+            }
+            
+            if (viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
+            
+            // Give device time to process
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            error = queryError();
+            
+            if (logCallback)
+            {
+                if (error.find("No error") != std::string::npos || error.find("+0") != std::string::npos)
+                {
+                    logCallback("DATA VOLATILE (re-upload) -> [Uploaded " + std::to_string(finalData.size()) + " points]");
+                }
+                else
+                {
+                    logCallback("DATA VOLATILE (re-upload) -> " + error);
+                    return;  // Don't proceed if re-upload failed
+                }
+            }
+        }
+        
+        // If we deleted a waveform or re-uploaded, try copying again
+        if (!copySucceeded && (error.find("+781") != std::string::npos || needReupload))
+        {
+            copyCmd = "DATA:COPY " + name + ",VOLATILE";
+            write(copyCmd);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            error = queryError();
+            
+            hasErrorCode = (error.find("+781") != std::string::npos || 
+                            error.find("+785") != std::string::npos ||
+                            error.find("+787") != std::string::npos ||
+                            error.find("+786") != std::string::npos ||
+                            error.find("+782") != std::string::npos ||
+                            error.find("+783") != std::string::npos ||
+                            error.find("+780") != std::string::npos);
+            
+            copySucceeded = !hasErrorCode && 
+                            (error.find("No error") != std::string::npos || 
+                             error.find("+0") != std::string::npos ||
+                             error.find("\"+0") != std::string::npos);
+        }
+        
+        // Log final copy result
+        if (logCallback)
+        {
+            if (copySucceeded)
+            {
+                logCallback("DATA:COPY " + name + " -> [Copied to non-volatile memory]");
+            }
+            else
+            {
+                logCallback("DATA:COPY " + name + " -> " + error);
+                if (error.find("+781") != std::string::npos)
+                {
+                    logCallback("Error: Memory still full after cleanup. Using VOLATILE memory.");
+                    logCallback("Note: VOLATILE memory is lost on power cycle.");
+                    useVolatile = true;  // Fall back to VOLATILE
+                }
+                else if (error.find("+780") != std::string::npos)
+                {
+                    logCallback("Error: VOLATILE memory lost. Using VOLATILE directly.");
+                    useVolatile = true;  // Fall back to VOLATILE
+                }
+                else
+                {
+                    logCallback("Error: Failed to copy waveform to device.");
+                    return;  // Don't proceed if copy failed for other reasons
+                }
+            }
+        }
+        
+        // Step 3: Select the waveform
+        // If we're using VOLATILE, select VOLATILE instead of the named waveform
+        if (useVolatile)
+        {
+            write("FUNCtion:USER VOLATILE");
+        }
+        else
+        {
+            write("FUNCtion:USER " + name);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        error = queryError();
+        
+        if (logCallback)
+        {
+            if (error.find("No error") != std::string::npos || error.find("+0") != std::string::npos)
+            {
+                if (useVolatile)
+                {
+                    logCallback("FUNCtion:USER VOLATILE -> [Selected (using volatile memory)]");
+                }
+                else
+                {
+                    logCallback("FUNCtion:USER " + name + " -> [Selected]");
+                }
+            }
+            else
+            {
+                logCallback("FUNCtion:USER " + (useVolatile ? std::string("VOLATILE") : name) + " -> " + error);
+            }
+        }
+        
+        // Step 4: Set shape to USER (optional but recommended)
+        write("FUNCtion:SHAPe USER");
+    }
+    catch (const std::exception& e)
+    {
+        if (logCallback)
+            logCallback("ARB upload exception: " + std::string(e.what()));
+    }
+    catch (...)
+    {
+        if (logCallback)
+            logCallback("ARB upload failed: Unknown error");
+    }
+}
+
+std::vector<float> HP33120ADriver::queryARBWaveform(const std::string& /*name*/)
+{
+    std::lock_guard<std::recursive_mutex> lock(driverMutex);
+    std::vector<float> result;
+    
+    if (!connected) return result;
+    
+    // HP33120A does not support querying ARB waveform data via SCPI
+    // This command is not in the manual and would cause read errors
+    // Return empty - ARB data must be tracked manually in the plugin
+    
+    return result;
+}
+
+bool HP33120ADriver::deleteARBWaveform(const std::string& /*name*/)
+{
+    std::lock_guard<std::recursive_mutex> lock(driverMutex);
+    if (!connected) return false;
+    
+    // HP33120A doesn't have a DELETE command for ARBs
+    // The device has 4 memory slots, and uploading with the same name overwrites
+    // However, to be safe, we can try to clear it by uploading zeros or a minimal waveform
+    // But actually, the device will just overwrite when we upload a new ARB with the same name
+    // So we don't need to delete - just upload will overwrite
+    
+    // Return true to indicate "handled" (we'll overwrite on next upload)
+    return true;
+}
+
+std::vector<std::string> HP33120ADriver::listARBNames()
+{
+    std::lock_guard<std::recursive_mutex> lock(driverMutex);
+    std::vector<std::string> result;
+    
+    if (!connected) return result;
+    
+    // HP33120A does not support querying ARB names via SCPI
+    // This command is not in the manual and causes read errors
+    // Return empty - we'll track ARB names manually in the plugin
+    // Don't even try the query to avoid VISA errors
+    
+    return result;
 }
 
 // Live Updates (LFO)

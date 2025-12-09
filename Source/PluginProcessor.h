@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
 #include "HP33120ADriver.h"
@@ -77,6 +78,10 @@ public:
     juce::AudioProcessorValueTreeState parameters;
     
     HP33120ADriver device;
+    
+    // ARB Management
+    std::unique_ptr<class ARBManager> arbManager;
+    std::unique_ptr<juce::AudioFormatManager> audioFormatManager;
     
 private:
     
