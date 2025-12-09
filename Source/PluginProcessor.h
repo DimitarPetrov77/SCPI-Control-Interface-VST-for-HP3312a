@@ -12,6 +12,9 @@
 */
 class HP33120APluginAudioProcessor  : public juce::AudioProcessor
 {
+    // Forward declaration for nested class (needed for getDeviceCommandThread)
+    class DeviceCommandThread;
+    
 public:
     //==============================================================================
     HP33120APluginAudioProcessor();
@@ -63,6 +66,7 @@ public:
     
     // Device access
     HP33120ADriver& getDevice() { return device; }
+    DeviceCommandThread* getDeviceCommandThread();
     
     // MIDI note to frequency conversion
     static double midiNoteToFrequency(int noteNumber);
@@ -140,6 +144,10 @@ private:
         DeviceCommandThread(HP33120ADriver& dev) : Thread("DeviceCommandThread"), device(dev) {}
         void run() override;
         void queueFrequencyUpdate(double freq);
+        void queueAmplitudeUpdate(double amp);
+        void queueOffsetUpdate(double offset);
+        void queuePhaseUpdate(double phase);
+        void queueDutyCycleUpdate(double duty);
         void stopThreadSafely();
         
     private:
@@ -147,7 +155,34 @@ private:
         juce::WaitableEvent commandPending;
         std::atomic<double> pendingFreq{0.0};
         std::atomic<bool> hasPendingFreq{false};
+        std::atomic<double> pendingAmp{0.0};
+        std::atomic<bool> hasPendingAmp{false};
+        std::atomic<double> pendingOffset{0.0};
+        std::atomic<bool> hasPendingOffset{false};
+        std::atomic<double> pendingPhase{0.0};
+        std::atomic<bool> hasPendingPhase{false};
+        std::atomic<double> pendingDuty{0.0};
+        std::atomic<bool> hasPendingDuty{false};
     };
+    
+    // Parameter listener to handle automation/LFO changes
+    // Throttles updates to ~20 Hz (50ms) like the Python version for smooth operation
+    class ParameterListener : public juce::AudioProcessorValueTreeState::Listener
+    {
+    public:
+        ParameterListener(HP33120APluginAudioProcessor& p) : processor(p) {}
+        void parameterChanged(const juce::String& parameterID, float newValue) override;
+    private:
+        HP33120APluginAudioProcessor& processor;
+        juce::int64 lastFreqUpdate = 0;
+        juce::int64 lastAmpUpdate = 0;
+        juce::int64 lastOffsetUpdate = 0;
+        juce::int64 lastPhaseUpdate = 0;
+        juce::int64 lastDutyUpdate = 0;
+        static constexpr int UPDATE_INTERVAL_MS = 50; // 20 Hz max update rate (matches Python version)
+    };
+    
+    std::unique_ptr<ParameterListener> parameterListener;
     
     std::unique_ptr<DeviceCommandThread> deviceCommandThread;
     

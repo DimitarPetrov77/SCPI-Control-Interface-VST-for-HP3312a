@@ -242,7 +242,8 @@ std::string HP33120ADriver::query(const std::string& cmd)
     viPrintf(sess, "%s", cmdWithNewline.c_str());
     
     if (viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    // Minimal delay - device needs time to respond, but keep it very short
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
     
     char buffer[1024] = {0};
     ViUInt32 retCount = 0;
@@ -298,6 +299,14 @@ void HP33120ADriver::applyWaveform(const std::string& shape, double freq, double
 }
 
 void HP33120ADriver::setWaveform(const std::string& waveform) { write("FUNC " + waveform); }
+
+void HP33120ADriver::setUserWaveform(const std::string& name)
+{
+    // Select a specific ARB waveform by name
+    // First set shape to USER, then select the specific waveform
+    write("FUNCtion:SHAPe USER");
+    write("FUNCtion:USER " + name);
+}
 
 void HP33120ADriver::setFrequency(double freqHz)
 {
@@ -891,15 +900,48 @@ bool HP33120ADriver::deleteARBWaveform(const std::string& /*name*/)
 
 std::vector<std::string> HP33120ADriver::listARBNames()
 {
+    // Use the catalog query to get ARB names
+    return queryWaveformCatalog();
+}
+
+std::vector<std::string> HP33120ADriver::queryWaveformCatalog()
+{
     std::lock_guard<std::recursive_mutex> lock(driverMutex);
     std::vector<std::string> result;
     
     if (!connected) return result;
     
-    // HP33120A does not support querying ARB names via SCPI
-    // This command is not in the manual and causes read errors
-    // Return empty - we'll track ARB names manually in the plugin
-    // Don't even try the query to avoid VISA errors
+    // Query DATA:CATalog? to get all available waveforms
+    // Response format: "SINC","NEG_RAMP","EXP_RISE","EXP_FALL","CARDIAC","VOLATILE","ARB_1","ARB_2"
+    std::string catalog = query("DATA:CATalog?");
+    
+    if (catalog.empty()) return result;
+    
+    // Parse quoted strings from the response
+    // Format: "NAME1","NAME2","NAME3"
+    size_t pos = 0;
+    while (pos < catalog.length())
+    {
+        // Find opening quote
+        size_t startQuote = catalog.find('"', pos);
+        if (startQuote == std::string::npos) break;
+        
+        // Find closing quote
+        size_t endQuote = catalog.find('"', startQuote + 1);
+        if (endQuote == std::string::npos) break;
+        
+        // Extract waveform name (without quotes)
+        std::string waveformName = catalog.substr(startQuote + 1, endQuote - startQuote - 1);
+        if (!waveformName.empty())
+        {
+            result.push_back(waveformName);
+        }
+        
+        // Move past this quoted string and any comma/whitespace
+        pos = endQuote + 1;
+        while (pos < catalog.length() && (catalog[pos] == ',' || catalog[pos] == ' ' || catalog[pos] == '\n' || catalog[pos] == '\r'))
+            pos++;
+    }
     
     return result;
 }

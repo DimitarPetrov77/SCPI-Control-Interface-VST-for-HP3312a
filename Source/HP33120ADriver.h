@@ -51,6 +51,7 @@ public:
 
     // Basic SCPI commands
     void setWaveform(const std::string& waveform);
+    void setUserWaveform(const std::string& name);  // Select specific ARB waveform by name
     void setFrequency(double freqHz);
     void setAmplitude(double ampVpp);
     void setOffset(double offsetV);
@@ -103,6 +104,7 @@ public:
     std::vector<float> queryARBWaveform(const std::string& name);  // Returns empty if not supported
     bool deleteARBWaveform(const std::string& name);  // Try SCPI DELETE, return success
     std::vector<std::string> listARBNames();  // Query device for ARB names (if supported)
+    std::vector<std::string> queryWaveformCatalog();  // Query DATA:CATalog? to get all available waveforms
     
     // Live updates for LFO
     void updateFrequencyLive(double freqHz);

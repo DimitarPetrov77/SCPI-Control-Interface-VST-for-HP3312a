@@ -59,6 +59,14 @@ HP33120APluginAudioProcessor::HP33120APluginAudioProcessor()
     
     // Initialize ARB Manager
     arbManager = std::make_unique<ARBManager>(device);
+    
+    // Add parameter listener to handle automation/LFO changes
+    parameterListener = std::make_unique<ParameterListener>(*this);
+    parameters.addParameterListener(Parameters::FREQUENCY, parameterListener.get());
+    parameters.addParameterListener(Parameters::AMPLITUDE, parameterListener.get());
+    parameters.addParameterListener(Parameters::OFFSET, parameterListener.get());
+    parameters.addParameterListener(Parameters::PHASE, parameterListener.get());
+    parameters.addParameterListener(Parameters::DUTY_CYCLE, parameterListener.get());
 }
 
 HP33120APluginAudioProcessor::~HP33120APluginAudioProcessor()
@@ -176,8 +184,9 @@ void HP33120APluginAudioProcessor::handleMIDI(const juce::MidiBuffer& midiMessag
                 if (frequencyParam) *frequencyParam = (float)freq;
                 
                 // 3. Queue device update in background thread (non-blocking, prevents audio thread stalls)
-                if (deviceCommandThread)
-                    deviceCommandThread->queueFrequencyUpdate(freq);
+                auto* cmdThread = getDeviceCommandThread();
+                if (cmdThread)
+                    cmdThread->queueFrequencyUpdate(freq);
                 
                 // 4. Log to UI (THREAD SAFE FIX)
                 // We must perform the callback on the Message Thread, otherwise the App crashes/freezes
@@ -220,6 +229,11 @@ bool HP33120APluginAudioProcessor::connectDevice(const std::string& resourceName
 void HP33120APluginAudioProcessor::disconnectDevice() { device.disconnect(); }
 std::string HP33120APluginAudioProcessor::getDeviceIDN() { return device.queryIDN(); }
 
+HP33120APluginAudioProcessor::DeviceCommandThread* HP33120APluginAudioProcessor::getDeviceCommandThread()
+{
+    return deviceCommandThread.get();
+}
+
 void HP33120APluginAudioProcessor::updateParameter(const juce::String& paramID, float value)
 {
     if (!device.isConnected()) return;
@@ -256,29 +270,83 @@ void HP33120APluginAudioProcessor::DeviceCommandThread::run()
         // Wait for a command - process immediately when signaled
         commandPending.wait();
         
-        // Check if we have a pending frequency update
+        if (!device.isConnected()) continue;
+        
+        // Process all pending parameter updates
         if (hasPendingFreq.load())
         {
             double freq = pendingFreq.load();
             hasPendingFreq = false;
-            
-            // Send to device immediately - let the device handle the rate, not the computer
-            // This is in background thread so it won't block audio, but we send as fast as MIDI comes in
-            if (device.isConnected())
-            {
-                device.setFrequency(freq);
-            }
+            device.setFrequency(freq);
+        }
+        
+        if (hasPendingAmp.load())
+        {
+            double amp = pendingAmp.load();
+            hasPendingAmp = false;
+            device.setAmplitude(amp);
+        }
+        
+        if (hasPendingOffset.load())
+        {
+            double offset = pendingOffset.load();
+            hasPendingOffset = false;
+            device.setOffset(offset);
+        }
+        
+        if (hasPendingPhase.load())
+        {
+            double phase = pendingPhase.load();
+            hasPendingPhase = false;
+            device.setPhase(phase);
+        }
+        
+        if (hasPendingDuty.load())
+        {
+            double duty = pendingDuty.load();
+            hasPendingDuty = false;
+            device.setDutyCycle(duty);
         }
     }
 }
 
 void HP33120APluginAudioProcessor::DeviceCommandThread::queueFrequencyUpdate(double freq)
 {
-    // Atomically update the pending frequency
+    // Atomically update the pending frequency (always stores latest value)
+    // This ensures that even if multiple updates come in between processing,
+    // we always send the most recent value to the device
     pendingFreq = freq;
     hasPendingFreq = true;
     
     // Signal the thread to wake up and process it
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueAmplitudeUpdate(double amp)
+{
+    pendingAmp = amp;
+    hasPendingAmp = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueOffsetUpdate(double offset)
+{
+    pendingOffset = offset;
+    hasPendingOffset = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queuePhaseUpdate(double phase)
+{
+    pendingPhase = phase;
+    hasPendingPhase = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueDutyCycleUpdate(double duty)
+{
+    pendingDuty = duty;
+    hasPendingDuty = true;
     commandPending.signal();
 }
 
@@ -287,4 +355,71 @@ void HP33120APluginAudioProcessor::DeviceCommandThread::stopThreadSafely()
     signalThreadShouldExit();
     commandPending.signal();
     stopThread(1000); // Wait up to 1 second for thread to finish
+}
+
+//==============================================================================
+// Parameter Listener Implementation for Automation/LFO
+// Throttles updates to 20 Hz (50ms) like the Python version for smooth operation
+//==============================================================================
+void HP33120APluginAudioProcessor::ParameterListener::parameterChanged(const juce::String& parameterID, float newValue)
+{
+    // PERFORMANCE CRITICAL: This is called from the audio thread for EVERY automation/LFO update
+    // Can be called thousands of times per second! Must be extremely lightweight.
+    
+    // Early exit if device not connected - no work needed
+    if (!processor.device.isConnected()) return;
+    
+    // Get command thread reference once (lightweight check)
+    auto* cmdThread = processor.getDeviceCommandThread();
+    if (!cmdThread) return; // No thread available, skip
+    
+    // PERFORMANCE: Use fast time check (milliseconds, not high-resolution)
+    juce::int64 currentTime = juce::Time::currentTimeMillis();
+    
+    // CRITICAL PERFORMANCE OPTIMIZATION: Throttle to 20 Hz (50ms) to prevent message spam
+    // Without throttling, automation at 48kHz = 48,000 calls/second = device overload!
+    // With throttling: Max 20 calls/second = smooth operation
+    // Strategy: Only queue updates at throttled rate, skipping intermediate values
+    if (parameterID == Parameters::FREQUENCY)
+    {
+        if (currentTime - lastFreqUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastFreqUpdate = currentTime;
+            cmdThread->queueFrequencyUpdate((double)newValue);
+        }
+        // PERFORMANCE: If throttled, we skip this update (expected - prevents spam)
+    }
+    else if (parameterID == Parameters::AMPLITUDE)
+    {
+        if (currentTime - lastAmpUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastAmpUpdate = currentTime;
+            cmdThread->queueAmplitudeUpdate((double)newValue);
+        }
+    }
+    else if (parameterID == Parameters::OFFSET)
+    {
+        if (currentTime - lastOffsetUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastOffsetUpdate = currentTime;
+            cmdThread->queueOffsetUpdate((double)newValue);
+        }
+    }
+    else if (parameterID == Parameters::PHASE)
+    {
+        if (currentTime - lastPhaseUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastPhaseUpdate = currentTime;
+            cmdThread->queuePhaseUpdate((double)newValue);
+        }
+    }
+    else if (parameterID == Parameters::DUTY_CYCLE)
+    {
+        if (currentTime - lastDutyUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastDutyUpdate = currentTime;
+            cmdThread->queueDutyCycleUpdate((double)newValue);
+        }
+    }
+    // PERFORMANCE: No else clause needed - unknown parameters are ignored (fast path)
 }

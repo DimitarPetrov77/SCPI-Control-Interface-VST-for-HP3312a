@@ -403,7 +403,7 @@ bool ARBManager::uploadSlotToDevice(int slotIndex)
         slots[slotIndex].uploadedToDevice = true;
         return true;
     }
-    catch (const std::exception& e)
+    catch (const std::exception&)
     {
         // Error already logged by device driver
         return false;

@@ -120,6 +120,7 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     waveformCombo.addItem("NOIS", 5);
     waveformCombo.addItem("DC", 6);
     waveformCombo.addItem("USER", 7);
+    // ARB waveforms will be added dynamically (IDs 8-11)
     waveformCombo.setSelectedId(1);
     waveformCombo.addListener(this);
     addAndMakeVisible(&waveformCombo);
@@ -461,6 +462,16 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
         arbSlotUIs[i].nameEditor.setText(defaultNames[i], juce::dontSendNotification);
         arbSlotUIs[i].nameEditor.setMultiLine(false);
         arbSlotUIs[i].nameEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colours::darkgrey);
+        arbSlotUIs[i].nameEditor.onTextChange = [this, i]() { 
+            // Update ARBManager slot name if available
+            if (audioProcessor.arbManager)
+            {
+                auto& slot = audioProcessor.arbManager->getSlot(i);
+                juce::ScopedLock sl(slot.lock);
+                slot.name = arbSlotUIs[i].nameEditor.getText();
+            }
+            refreshWaveformComboBox(); 
+        };
         addAndMakeVisible(&arbSlotUIs[i].nameEditor);
         
         arbSlotUIs[i].pointsLabel.setText("Points:", juce::dontSendNotification);
@@ -496,6 +507,9 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
         arbSlotUIs[i].fileNameLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
         addAndMakeVisible(&arbSlotUIs[i].fileNameLabel);
     }
+    
+    // Refresh waveform combo box with ARB names (after ARB slots are initialized)
+    refreshWaveformComboBox();
     
     triggerSourceLabel.setText("Trigger Source:", juce::dontSendNotification);
     addAndMakeVisible(&triggerSourceLabel);
@@ -750,17 +764,26 @@ void HP33120APluginAudioProcessorEditor::resized()
     statusBox.setBounds(area.reduced(2));
 }
 
-// THIS IS THE FIXED TIMER CALLBACK YOU ASKED FOR
+// PERFORMANCE: Timer runs at 100ms (10 Hz) - only for UI updates, not device communication
+// This is lightweight and only updates UI labels, never queries device
 void HP33120APluginAudioProcessorEditor::timerCallback()
 {
-    // 1. Update IDN
+    // PERFORMANCE: Use cached IDN instead of querying device every 100ms
+    // Device queries are expensive (GPIB communication), so we cache on connection
     if (audioProcessor.isDeviceConnected())
     {
-        idnLabel.setText("IDN: " + juce::String(audioProcessor.getDeviceIDN()), juce::dontSendNotification);
+        if (!idnCacheValid)
+        {
+            // Cache IDN on first timer tick after connection (lazy load)
+            cachedDeviceIDN = audioProcessor.getDeviceIDN();
+            idnCacheValid = true;
+        }
+        idnLabel.setText("IDN: " + cachedDeviceIDN, juce::dontSendNotification);
     }
     else
     {
         idnLabel.setText("IDN: (Not connected)", juce::dontSendNotification);
+        idnCacheValid = false; // Reset cache on disconnect
     }
     
     // 2. Scan ALL 16 MIDI Channels for activity
@@ -814,7 +837,15 @@ void HP33120APluginAudioProcessorEditor::buttonClicked(juce::Button* button)
         if (audioProcessor.connectDevice(address))
         {
             appendStatus("Connected to: " + address);
-            appendStatus("Device IDN: " + audioProcessor.getDeviceIDN());
+            std::string idn = audioProcessor.getDeviceIDN();
+            appendStatus("Device IDN: " + idn);
+            
+            // PERFORMANCE: Cache IDN for timer callback (avoids expensive GPIB query every 100ms)
+            cachedDeviceIDN = juce::String(idn);
+            idnCacheValid = true;
+            
+            // Query device for available waveforms and update combo boxes
+            refreshWaveformComboBoxesFromDevice();
         }
         else
         {
@@ -826,6 +857,9 @@ void HP33120APluginAudioProcessorEditor::buttonClicked(juce::Button* button)
     {
         audioProcessor.disconnectDevice();
         appendStatus("Disconnected");
+        // PERFORMANCE: Clear IDN cache on disconnect
+        idnCacheValid = false;
+        cachedDeviceIDN.clear();
     }
     // Check ARB slot buttons
     for (int i = 0; i < 4; ++i)
@@ -883,7 +917,7 @@ void HP33120APluginAudioProcessorEditor::buttonClicked(juce::Button* button)
             else if (button == &syncEnabledToggle) device.setSyncEnabled(syncEnabledToggle.getToggleState());
             else if (button == &outputToggle) device.setOutputEnabled(outputToggle.getToggleState());
             
-            juce::Thread::sleep(20);
+            // No delay - send commands immediately
         }
         catch (...) { appendStatus("Toggle error"); }
     }
@@ -898,24 +932,76 @@ void HP33120APluginAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBo
     {
         if (comboBox == &waveformCombo)
         {
-            juce::StringArray waveforms = {"SIN", "SQU", "TRI", "RAMP", "NOIS", "DC", "USER"};
-            int idx = waveformCombo.getSelectedId() - 1;
-            if (idx >= 0 && idx < waveforms.size())
-                device.setWaveform(waveforms[idx].toStdString());
+            int selectedId = waveformCombo.getSelectedId();
             
-            dutyCycleSlider.setEnabled(idx == 1); // Only for SQU
+            // Built-in waveforms (IDs 1-7)
+            if (selectedId >= 1 && selectedId <= 7)
+            {
+                juce::StringArray waveforms = {"SIN", "SQU", "TRI", "RAMP", "NOIS", "DC", "USER"};
+                int idx = selectedId - 1;
+                if (idx >= 0 && idx < waveforms.size())
+                {
+                    if (idx == 6) // USER (generic)
+                    {
+                        // Generic USER - select VOLATILE or first available ARB
+                        device.setWaveform("USER");
+                    }
+                    else
+                    {
+                        device.setWaveform(waveforms[idx].toStdString());
+                    }
+                }
+                dutyCycleSlider.setEnabled(idx == 1); // Only for SQU
+            }
+            // ARB waveforms (IDs 8+)
+            else if (selectedId >= 8)
+            {
+                // Get the ARB name from the combo box item text
+                juce::String arbName = waveformCombo.getItemText(waveformCombo.getSelectedItemIndex());
+                
+                if (!arbName.isEmpty())
+                {
+                    // Select the specific ARB waveform
+                    device.setUserWaveform(arbName.toStdString());
+                    dutyCycleSlider.setEnabled(false); // ARB waveforms don't use duty cycle
+                }
+            }
         }
         else if (comboBox == &amIntWaveformCombo)
         {
-            juce::StringArray waves = {"SIN", "SQU", "TRI", "RAMP", "NOIS", "USER"};
-            int idx = amIntWaveformCombo.getSelectedId() - 1;
-            if (idx >= 0) device.setAMInternalWaveform(waves[idx].toStdString());
+            int selectedId = amIntWaveformCombo.getSelectedId();
+            if (selectedId >= 1 && selectedId <= 6)
+            {
+                juce::StringArray waves = {"SIN", "SQU", "TRI", "RAMP", "NOIS", "USER"};
+                int idx = selectedId - 1;
+                if (idx >= 0 && idx < waves.size())
+                    device.setAMInternalWaveform(waves[idx].toStdString());
+            }
+            else if (selectedId >= 7)
+            {
+                // ARB waveform selected
+                juce::String arbName = amIntWaveformCombo.getItemText(amIntWaveformCombo.getSelectedItemIndex());
+                if (!arbName.isEmpty())
+                    device.setAMInternalWaveform(arbName.toStdString());
+            }
         }
         else if (comboBox == &fmIntWaveformCombo)
         {
-            juce::StringArray waves = {"SIN", "SQU", "TRI", "RAMP", "NOIS", "USER"};
-            int idx = fmIntWaveformCombo.getSelectedId() - 1;
-            if (idx >= 0) device.setFMInternalWaveform(waves[idx].toStdString());
+            int selectedId = fmIntWaveformCombo.getSelectedId();
+            if (selectedId >= 1 && selectedId <= 6)
+            {
+                juce::StringArray waves = {"SIN", "SQU", "TRI", "RAMP", "NOIS", "USER"};
+                int idx = selectedId - 1;
+                if (idx >= 0 && idx < waves.size())
+                    device.setFMInternalWaveform(waves[idx].toStdString());
+            }
+            else if (selectedId >= 7)
+            {
+                // ARB waveform selected
+                juce::String arbName = fmIntWaveformCombo.getItemText(fmIntWaveformCombo.getSelectedItemIndex());
+                if (!arbName.isEmpty())
+                    device.setFMInternalWaveform(arbName.toStdString());
+            }
         }
         else if (comboBox == &amSourceCombo)
         {
@@ -948,7 +1034,7 @@ void HP33120APluginAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBo
             if (idx >= 0) device.setTriggerSource(sources[idx].toStdString());
         }
         
-        juce::Thread::sleep(20);
+        // No delay - send commands immediately
     }
     catch (...) { appendStatus("Combo error"); }
 }
@@ -976,13 +1062,49 @@ void HP33120APluginAudioProcessorEditor::updateSingleParameter(juce::Slider* sli
     isUpdatingParameters = true;
     HP33120ADriver& device = audioProcessor.getDevice();
     
+    // For user interactions, queue through background thread for consistency
     try
     {
-        if (slider == &frequencySlider) device.setFrequency(frequencySlider.getValue());
-        else if (slider == &amplitudeSlider) device.setAmplitude(amplitudeSlider.getValue());
-        else if (slider == &offsetSlider) device.setOffset(offsetSlider.getValue());
-        else if (slider == &phaseSlider) device.setPhase(phaseSlider.getValue());
-        else if (slider == &dutyCycleSlider) device.setDutyCycle(dutyCycleSlider.getValue());
+        if (slider == &frequencySlider) 
+        {
+            auto* cmdThread = audioProcessor.getDeviceCommandThread();
+            if (cmdThread)
+                cmdThread->queueFrequencyUpdate(frequencySlider.getValue());
+            else
+                device.setFrequency(frequencySlider.getValue());
+        }
+        else if (slider == &amplitudeSlider) 
+        {
+            auto* cmdThread = audioProcessor.getDeviceCommandThread();
+            if (cmdThread)
+                cmdThread->queueAmplitudeUpdate(amplitudeSlider.getValue());
+            else
+                device.setAmplitude(amplitudeSlider.getValue());
+        }
+        else if (slider == &offsetSlider) 
+        {
+            auto* cmdThread = audioProcessor.getDeviceCommandThread();
+            if (cmdThread)
+                cmdThread->queueOffsetUpdate(offsetSlider.getValue());
+            else
+                device.setOffset(offsetSlider.getValue());
+        }
+        else if (slider == &phaseSlider) 
+        {
+            auto* cmdThread = audioProcessor.getDeviceCommandThread();
+            if (cmdThread)
+                cmdThread->queuePhaseUpdate(phaseSlider.getValue());
+            else
+                device.setPhase(phaseSlider.getValue());
+        }
+        else if (slider == &dutyCycleSlider) 
+        {
+            auto* cmdThread = audioProcessor.getDeviceCommandThread();
+            if (cmdThread)
+                cmdThread->queueDutyCycleUpdate(dutyCycleSlider.getValue());
+            else
+                device.setDutyCycle(dutyCycleSlider.getValue());
+        }
         else if (slider == &amDepthSlider) device.setAMDepth(amDepthSlider.getValue());
         else if (slider == &amIntFreqSlider) device.setAMInternalFrequency(amIntFreqSlider.getValue());
         else if (slider == &fmDevSlider) device.setFMDeviation(fmDevSlider.getValue());
@@ -1005,6 +1127,17 @@ void HP33120APluginAudioProcessorEditor::updateSingleParameter(juce::Slider* sli
 void HP33120APluginAudioProcessorEditor::sliderValueChanged(juce::Slider* slider)
 {
     if (isUpdatingParameters) return;
+    
+    // CRITICAL FIX: Ignore programmatic updates from automation/LFO
+    // When automation changes a parameter, SliderAttachment updates the slider,
+    // but we should NOT process it here - the ParameterListener handles device updates
+    if (!slider->isMouseButtonDown() && !slider->hasKeyboardFocus(true))
+    {
+        // This is a programmatic update (automation/LFO), not user interaction
+        // The ParameterListener will handle sending to device, so we skip here
+        return;
+    }
+    
     if (slider->isMouseButtonDown()) return; // Wait for drag end
     
     // Check for snapped values to avoid recursive updates
@@ -1041,6 +1174,230 @@ void HP33120APluginAudioProcessorEditor::sliderValueChanged(juce::Slider* slider
 void HP33120APluginAudioProcessorEditor::updateDeviceParameters()
 {
     // Full sync implementation omitted for brevity, single param update is primary
+}
+
+void HP33120APluginAudioProcessorEditor::refreshWaveformComboBox()
+{
+    // Store current selection
+    int currentWaveformSelection = waveformCombo.getSelectedId();
+    
+    // ComboBox doesn't have removeItem, so we need to rebuild
+    // First, collect all ARB names
+    juce::StringArray arbNames;
+    for (int i = 0; i < 4; ++i)
+    {
+        juce::String arbName;
+        if (audioProcessor.arbManager)
+        {
+            auto& slot = audioProcessor.arbManager->getSlot(i);
+            juce::ScopedLock sl(slot.lock);
+            arbName = slot.name;
+        }
+        else
+        {
+            arbName = arbSlotUIs[i].nameEditor.getText();
+        }
+        
+        if (arbName.isEmpty())
+            arbName = "ARB" + juce::String(i + 1);
+        
+        arbNames.add(arbName);
+    }
+    
+    // Remove existing ARB items by checking if they exist and rebuilding
+    // Since we can't remove individual items, we'll just add new ones
+    // (duplicates won't be added if IDs match, but we need to avoid duplicates)
+    // Actually, let's just add them - if they already exist with the same ID, JUCE will handle it
+    for (int i = 0; i < arbNames.size(); ++i)
+    {
+        // Check if this ARB already exists
+        int existingIndex = waveformCombo.indexOfItemId(8 + i);
+        if (existingIndex >= 0)
+        {
+            // Update the text if it changed
+            if (waveformCombo.getItemText(existingIndex) != arbNames[i])
+            {
+                waveformCombo.changeItemText(8 + i, arbNames[i]);
+            }
+        }
+        else
+        {
+            // Add new ARB item
+            waveformCombo.addItem(arbNames[i], 8 + i);
+        }
+    }
+    
+    // Restore selection if it's still valid
+    if (waveformCombo.indexOfItemId(currentWaveformSelection) >= 0)
+    {
+        waveformCombo.setSelectedId(currentWaveformSelection, juce::dontSendNotification);
+    }
+}
+
+void HP33120APluginAudioProcessorEditor::refreshWaveformComboBoxesFromDevice()
+{
+    if (!audioProcessor.isDeviceConnected()) return;
+    
+    try
+    {
+        // Query device for available waveforms
+        std::vector<std::string> waveforms = audioProcessor.getDevice().queryWaveformCatalog();
+        
+        if (waveforms.empty())
+        {
+            appendStatus("No waveforms found in device catalog");
+            return;
+        }
+        
+        // Built-in waveform names (these are always available)
+        juce::StringArray builtInWaveforms = {"SIN", "SQU", "TRI", "RAMP", "NOIS", "DC"};
+        juce::StringArray builtInARBs = {"SINC", "NEG_RAMP", "EXP_RISE", "EXP_FALL", "CARDIAC"};
+        
+        // Separate user-defined ARBs from built-ins
+        juce::StringArray userARBs;
+        juce::StringArray allARBs;  // All ARB waveforms (built-in + user-defined)
+        
+        for (const auto& wf : waveforms)
+        {
+            juce::String wfName = juce::String(wf).toUpperCase();
+            
+            // Check if it's a built-in ARB
+            bool isBuiltInARB = false;
+            for (const auto& builtIn : builtInARBs)
+            {
+                if (wfName == builtIn.toUpperCase())
+                {
+                    isBuiltInARB = true;
+                    allARBs.add(wfName);
+                    break;
+                }
+            }
+            
+            // If not a built-in ARB and not VOLATILE (which is temporary), it's a user-defined ARB
+            if (!isBuiltInARB && wfName != "VOLATILE" && wfName != "USER")
+            {
+                // Check if it's not a standard waveform
+                bool isStandard = false;
+                for (const auto& std : builtInWaveforms)
+                {
+                    if (wfName == std.toUpperCase())
+                    {
+                        isStandard = true;
+                        break;
+                    }
+                }
+                if (!isStandard)
+                {
+                    userARBs.add(wfName);
+                    allARBs.add(wfName);
+                }
+            }
+            
+            // Also add VOLATILE if it exists (temporary ARB memory)
+            if (wfName == "VOLATILE")
+            {
+                allARBs.add("VOLATILE");
+            }
+        }
+        
+        // Update main waveform combo box
+        // Store current selection
+        int currentWaveformSelection = waveformCombo.getSelectedId();
+        
+        // Remove existing ARB items by rebuilding the combo box
+        // Since ComboBox doesn't have removeItem, we'll clear and rebuild
+        // But we want to keep built-in items (IDs 1-7), so we'll rebuild just the ARB section
+        // First, remove all ARB items by finding their indices and clearing/rebuilding
+        // Actually, simpler: just update existing or add new ARB items
+        int nextID = 8;
+        for (const auto& arb : allARBs)
+        {
+            // Check if this ARB already exists
+            int existingIndex = waveformCombo.indexOfItemId(nextID);
+            if (existingIndex >= 0)
+            {
+                // Update the text if it changed
+                if (waveformCombo.getItemText(existingIndex) != arb)
+                {
+                    waveformCombo.changeItemText(nextID, arb);
+                }
+            }
+            else
+            {
+                // Add new ARB item
+                waveformCombo.addItem(arb, nextID);
+            }
+            nextID++;
+        }
+        
+        // Remove any ARB items that are no longer in the device catalog
+        // We can't easily remove items, so we'll just leave them (they'll be stale but harmless)
+        // Or we could clear and rebuild, but that's more disruptive
+        
+        // Update AM/FM internal waveform combo boxes with ARB waveforms
+        // Since ComboBox doesn't have removeItem, we'll update existing or add new ARB items
+        for (auto* combo : {&amIntWaveformCombo, &fmIntWaveformCombo})
+        {
+            // Store current selection (different variable name to avoid shadowing)
+            int comboCurrentSelection = combo->getSelectedId();
+            
+            // Add/update all ARB waveforms
+            int arbStartID = 7;  // Start IDs for ARBs in AM/FM combos (after USER which is 6)
+            for (const auto& arb : allARBs)
+            {
+                // Check if this ARB already exists
+                int existingIndex = combo->indexOfItemId(arbStartID);
+                if (existingIndex >= 0)
+                {
+                    // Update the text if it changed
+                    if (combo->getItemText(existingIndex) != arb)
+                    {
+                        combo->changeItemText(arbStartID, arb);
+                    }
+                }
+                else
+                {
+                    // Add new ARB item
+                    combo->addItem(arb, arbStartID);
+                }
+                arbStartID++;
+            }
+            
+            // Restore selection if it's still valid
+            if (combo->indexOfItemId(comboCurrentSelection) >= 0)
+            {
+                combo->setSelectedId(comboCurrentSelection, juce::dontSendNotification);
+            }
+        }
+        
+        // Log the discovered waveforms
+        juce::String logMsg = "Discovered waveforms: ";
+        for (size_t i = 0; i < waveforms.size(); ++i)
+        {
+            if (i > 0) logMsg += ", ";
+            logMsg += juce::String(waveforms[i]);
+        }
+        appendStatus(logMsg);
+        
+        if (!userARBs.isEmpty())
+        {
+            juce::String arbMsg = "User ARBs: ";
+            for (int i = 0; i < userARBs.size(); ++i)
+            {
+                if (i > 0) arbMsg += ", ";
+                arbMsg += userARBs[i];
+            }
+            appendStatus(arbMsg);
+        }
+    }
+    catch (const std::exception& e)
+    {
+        appendStatus("Error querying waveform catalog: " + juce::String(e.what()));
+    }
+    catch (...)
+    {
+        appendStatus("Unknown error querying waveform catalog");
+    }
 }
 
 // ARB Slot Management Functions
@@ -1135,6 +1492,8 @@ void HP33120APluginAudioProcessorEditor::uploadSlotToDevice(int slotIndex)
                     arbSlotUIs[idx].statusLabel.setText("Uploaded", juce::dontSendNotification);
                     arbSlotUIs[idx].statusLabel.setColour(juce::Label::textColourId, juce::Colours::green);
                     appendStatus("ARB Slot " + juce::String(idx + 1) + ": " + message);
+                    // Refresh waveform combo boxes from device to get updated catalog
+                    refreshWaveformComboBoxesFromDevice();
                 }
                 else
                 {
@@ -1172,6 +1531,8 @@ void HP33120APluginAudioProcessorEditor::deleteARBFromDevice(int slotIndex)
         arbSlotUIs[slotIndex].statusLabel.setText("Deleted", juce::dontSendNotification);
         arbSlotUIs[slotIndex].statusLabel.setColour(juce::Label::textColourId, juce::Colours::orange);
         appendStatus("ARB Slot " + juce::String(slotIndex + 1) + ": Deleted from device");
+        // Refresh waveform combo boxes from device to update catalog
+        refreshWaveformComboBoxesFromDevice();
     }
     else
     {

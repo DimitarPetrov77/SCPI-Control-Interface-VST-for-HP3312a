@@ -148,6 +148,10 @@ private:
     static constexpr int MAX_STATUS_MESSAGES = 30;  // Keep only last 30 messages
     juce::StringArray statusMessages;  // Circular buffer for status messages
     
+    // PERFORMANCE: Cache IDN to avoid expensive device query every 100ms in timer
+    juce::String cachedDeviceIDN;
+    bool idnCacheValid = false;
+    
     // Parameter attachments
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> sliderAttachments;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> comboAttachments;
@@ -156,6 +160,8 @@ private:
     void updateDeviceParameters();
     void updateSingleParameter(juce::Slider* slider);  // Must be public or accessible
     void appendStatus(const juce::String& message);
+    void refreshWaveformComboBox();  // Update waveform combo box with ARB names from UI
+    void refreshWaveformComboBoxesFromDevice();  // Query device and update all waveform combo boxes
     
     // ARB slot management
     void loadAudioFileToSlot(int slotIndex);
@@ -168,7 +174,7 @@ private:
     
     bool isUpdatingParameters = false;  // Prevent recursive updates
     juce::int64 lastUpdateTime = 0;  // Throttle updates
-    static constexpr int MIN_UPDATE_INTERVAL_MS = 50;  // Minimum time between updates
+    static constexpr int MIN_UPDATE_INTERVAL_MS = 0;  // No throttling - immediate updates
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HP33120APluginAudioProcessorEditor)
 };
