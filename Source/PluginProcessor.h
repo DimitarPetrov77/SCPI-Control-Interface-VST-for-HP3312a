@@ -163,6 +163,10 @@ private:
         std::atomic<bool> hasPendingPhase{false};
         std::atomic<double> pendingDuty{0.0};
         std::atomic<bool> hasPendingDuty{false};
+        
+        // Periodic error checking - check every 500ms to catch errors from writeFast()
+        juce::int64 lastErrorCheck{0};
+        static constexpr int ERROR_CHECK_INTERVAL_MS = 500;
     };
     
     // Parameter listener to handle automation/LFO changes
@@ -179,7 +183,7 @@ private:
         juce::int64 lastOffsetUpdate = 0;
         juce::int64 lastPhaseUpdate = 0;
         juce::int64 lastDutyUpdate = 0;
-        static constexpr int UPDATE_INTERVAL_MS = 50; // 20 Hz max update rate (matches Python version)
+        static constexpr int UPDATE_INTERVAL_MS = 20; // 50 Hz max update rate for smooth operation
     };
     
     std::unique_ptr<ParameterListener> parameterListener;

@@ -1,0 +1,1397 @@
+SYNC Signal
+A sync signal output is provided on the front-panel SYNC terminal. 
+All of the standard output functions (except dc and noise) have an
+associated sync signal. For certain applications where you may not want
+to output the sync signal, you can disable the SYNC terminal.
+The SYNC terminal can be enabled/disabled from the remote interface only.
+ By default, the sync signal is routed to the SYNC terminal (enabled).
+ When the sync signal is disabled, the output level on the SYNC
+terminal is indeterminate (it might be a TTL “high” or a TTL “low”).
+ For sine, square, triangle, and ramp waveforms, the sync signal is a
+TTL “high” when the waveform’s output is positive, relative to zero
+volts (or the dc offset value). The signal is a TTL “low” when the
+output is negative, relative to zero volts (or the dc offset value). 
+ For arbitrary waveforms, a momentary TTL “high” pulse (> 200 ns) is
+output which corresponds to the first downloaded point in the waveform.
+ For AM and FM, the sync signal is referenced to the modulating
+signal (not the carrier). A momentary TTL “high” pulse (> 200 ns) is
+output at each zero-crossing point of the modulating signal.
+ For the triggered burst mode, a TTL “low” signal is output while the
+specified number of cycles is output (for the duration of the burst).
+After the specified number of cycles has been output, the sync signal
+goes “high” until the next burst. 
+ For the external gated burst mode, the sync signal is a TTL “high”
+when the output is positive, relative to zero volts (or the dc offset
+value). The signal is a TTL “low” when the output is negative, relative
+to zero volts (or the dc offset value). 
+ For FSK, a momentary TTL “high” pulse (> 200 ns) is output on the
+transition to the “hop” frequency.
+ For frequency sweeps, the sync signal is a TTL “low” at the start of the
+sweep (when the start frequency is output) and is a TTL “high” at the
+end of the sweep (when the stop frequency is output).
+ Remote Interface Operation:
+ OUTPut:SYNC {OFF|ON} Setting is stored in volatile memory. 
+Chapter 3 Features and Functions 
+Output Configuration 
+68
+Instrument State Storage
+You can store up to three different instrument states in non-volatile
+memory. This enables you to recall the entire instrument configuration
+with a single command from the remote interface or with just a few
+key presses from the front panel. 
+ Three memory locations (numbered 1, 2, and 3) are available to store
+instrument configurations. The state storage feature “remembers” the
+function (including arbitrary waveforms), frequency, amplitude,
+dc offset, duty cycle, as well as any modulation parameters. To recall
+a stored state, you must use the same memory location used
+previously to store the state.
+ You cannot recall the instrument state from a memory location that
+was not previously specified as a storage location. For example, an
+error is generated if you attempt to recall from memory location “2”
+but have never stored to that location.
+From the front panel, “NOT STORED” is displayed if nothing is stored
+in the specified memory location. From the remote interface, a
++810, “State has not been stored” error is generated if nothing is
+stored in the specified memory location.
+ Any arbitrary waveforms downloaded to “VOLATILE” memory are not
+remembered. However, if an arbitrary waveform is being output
+from non-volatile memory when the state is stored, the waveform
+data is stored. The stored waveform is output when the instrument
+state is recalled.
+ If you delete an arbitrary waveform after storing the state, the
+waveform data is lost and the function generator will not output the
+waveform when the state is recalled. The “SINC” waveform is output
+in place of the deleted waveform.
+ 3
+Chapter 3 Features and Functions 
+Output Configuration 
+69
+State Storage
+(continued)
+ When power is turned off, the function generator automatically stores
+its state in memory location “0”. You can configure the function
+generator to automatically recall the power-down state when power is
+restored. The recall mode is disabled when the function generator is
+shipped from the factory.
+Select the POWER ON LAST STATE command from the SYS MENU to
+enable the power-down recall mode. Select POWER ON DEFAULT to
+disable the power-down recall mode. See “Power-Down Recall Mode”
+on page 109 for more information. 
+ From the remote interface, you can use memory location “0” to store
+a fourth instrument configuration (you cannot store to this memory
+location from the front panel). However, keep in mind that memory
+location “0” is automatically overwritten when the power is turned off.
+ Front-Panel Operation: 
+To store the state, press Shift Store . Then use the knob, arrow
+keys, or “Enter Number” mode to select the memory location. 
+To restore the state, press Recall . Then use the knob, arrow keys,
+or “Enter Number” mode to select the memory location. 
+ Remote Interface Operation:
+ *SAV {0|1|2|3} State 0 is the instrument state at power down.
+ *RCL {0|1|2|3} States 1, 2, and 3 are user-defined states. 
+ From the remote interface, you can delete individual stored states
+and clear the memory location. If nothing is stored in the specified
+memory location, a +810, “State has not been stored” error is generated.
+ MEMory:STATe:DELete {0|1|2|3}
+Chapter 3 Features and Functions 
+Output Configuration 
+70
+Amplitude Modulation (AM) 
+A modulated waveform consists of a carrier waveform and a modulating
+waveform. In AM, the amplitude of the carrier is varied by the amplitude
+of the modulating waveform. The function generator will accept an
+internal modulating signal, an external modulating signal, or both. 
+For more information on the fundamentals of Amplitude Modulation,
+refer to chapter 7, “Tutorial”.
+To Select AM Modulation
+ The AM annunciator turns on when AM is enabled.
+ Only one modulation mode can be enabled at a time. When you
+enable AM, the previous modulation mode is turned off. 
+ Front-Panel Operation: Enable AM before setting up the other
+modulation parameters. Press Shift AM to output an AM waveform
+using the present settings for the carrier frequency, modulating
+frequency, output amplitude, and offset voltage.
+ Remote Interface Operation: To ensure proper operation, you should
+enable AM after you have set up the other modulation parameters.
+ AM:STATe {OFF|ON}
+ 3
+Chapter 3 Features and Functions 
+Amplitude Modulation (AM) 
+71
+Carrier Waveform Shape 
+ AM carrier shape: Sine, Square, Triangle, Ramp, or Arbitrary
+waveform. The default is Sine.
+ You cannot use the noise function or dc volts as the carrier waveform.
+ Front-Panel Operation: Press any of the front-panel function keys
+except Noise . For arbitrary waveforms, the Arb key selects the
+waveform that is currently downloaded. 
+ Remote Interface Operation: 
+ FUNCtion:SHAPe {SINusoid|SQUare|TRIangle|RAMP|USER}
+You can also use the APPLy command to select the function,
+frequency, amplitude, and offset with a single command.
+Carrier Frequency
+ Carrier frequency: 100 	Hz to 15 MHz (100 kHz for triangle and
+ramp). The default is 1 kHz.
+ For arbitrary waveforms, the maximum carrier frequency depends on
+the number of points specified in the waveform. The five built-in
+arbitrary waveforms can be output at a maximum of 5 MHz. 
+ Front-Panel Operation: Press the Freq key to select any valid
+frequency for the selected function (the present amplitude and offset
+voltage are used).
+ Remote Interface Operation: 
+ FREQuency {<frequency>|MINimum|MAXimum}
+Number of Arb Points
+8 to 8,192 (8k)
+8,193 to 12,287 (12k)
+12,288 to 16,000
+Minimum Frequency
+ 100 Hz
+ 100 Hz
+ 100 Hz
+Maximum Frequency
+ 5 MHz
+ 2.5 MHz
+ 200 kHz
+Chapter 3 Features and Functions 
+Amplitude Modulation (AM) 
+72
+Modulating Waveform Shape
+The function generator will accept an internal modulating signal,
+an external modulating signal, or both. 
+ Modulating waveform shape (internal source): Sine, Square,
+Triangle, Ramp, Noise, or Arbitrary waveform. The default is Sine. 
+ You can use the noise function as the modulating waveform.
+However, you cannot use the noise function or dc volts as the
+carrier waveform.
+ Front-Panel Operation: After enabling AM, press Recall Menu to go
+directly to the AM SHAPE command in the menu.
+ 1: AM SHAPE (MOD MENU)
+ Remote Interface Operation: 
+AM:INTernal:FUNCtion {SINusoid|SQUare|TRIangle|RAMP|NOISe|USER}
+ 3
+Chapter 3 Features and Functions 
+Amplitude Modulation (AM) 
+73
+Modulating Waveform Frequency
+The function generator will accept an internal modulating signal,
+an external modulating signal, or both. 
+ Modulating frequency (internal source): 10 mHz to 20 kHz.
+The default is 100 Hz.
+ The sync signal for AM is referenced to the modulating signal (not the
+carrier). A momentary TTL “high” pulse (> 200 ns) is output at each
+zero-crossing point of the modulating signal. The signal is output
+from the front-panel SYNC terminal. 
+ Front-Panel Operation: Press Shift Freq to set the modulating
+frequency (the value is displayed for approximately 10 seconds).
+Before setting the modulating frequency from the front panel,
+you must have AM enabled. If you attempt to set the frequency when
+AM is not enabled, “SELECT AM, FM” is displayed. 
+ Remote Interface Operation: 
+ AM:INTernal:FREQuency {<frequency>|MINimum|MAXimum}
+Modulation Depth
+The modulation depth is expressed as a percentage and represents the
+extent of the amplitude variation. At 0% modulation, the output amplitude
+is half of the selected value. At 100% modulation, the output amplitude
+equals the selected value.
+ Modulation depth: 0% to 120%. The default is 100%. 
+ Front-Panel Operation: Press Shift Level to set the depth in percent
+(the value is displayed for approximately 10 seconds).
+Before setting the modulation depth from the front panel, you must
+have AM enabled. If you attempt to set the depth when AM is not
+enabled, “SELECT AM, FM” is displayed.
+ Remote Interface Operation: 
+ AM:DEPTh {<depth in percent>|MINimum|MAXimum}
+Chapter 3 Features and Functions 
+Amplitude Modulation (AM) 
+74
+Modulating Source
+The function generator will accept an internal modulating signal,
+an external modulating signal, or both. 
+ Modulating source: Internal-External (both) or External only.
+The default is Both (internal-external).
+ The External modulating source is always enabled. 
+ When both sources are enabled (internal-external), the function
+generator adds the internal and external modulating signals
+(the carrier waveform is actually modulated with two waveforms).
+ When the internal source is disabled (external only), the carrier
+waveform is modulated with the external waveform. The Ext
+annunciator turns on to indicate that the function generator is
+expecting a modulating signal on the rear-panel AM Modulation
+terminal.
+ You apply the external modulating waveform to the AM Modulation
+terminal. The modulation depth is controlled by the signal level
+present (5 volts peak corresponds to 100% modulation).
+ 
+ Front-Panel Operation: 
+ 2: AM SOURCE (MOD MENU) 
+ Remote Interface Operation: 
+ AM:SOURce {BOTH|EXTernal}
+5 V
+0 V
+-5 V
+ 3
+Chapter 3 Features and Functions 
+Amplitude Modulation (AM) 
+75
+Frequency Modulation (FM) 
+A modulated waveform consists of a carrier waveform and a modulating
+waveform. In FM, the frequency of the carrier is varied by the frequency
+of the modulating waveform. The function generator will accept only an
+internal FM modulating signal (no external source is available). 
+For more information on the fundamentals of Frequency Modulation,
+refer to chapter 7, “Tutorial”. 
+To Select FM Modulation
+ The FM annunciator turns on when FM is enabled.
+ Only one modulation mode can be enabled at a time. When you
+enable FM, the previous modulation mode is turned off. 
+ Front-Panel Operation: Enable FM before setting up the other
+modulation parameters. Press Shift FM to output an FM waveform
+using the present settings for the carrier frequency, modulating
+frequency, output amplitude, and offset voltage.
+ Remote Interface Operation: To ensure proper operation, you should
+enable FM after you have set up the other modulation parameters.
+ FM:STATe {OFF|ON}
+Chapter 3 Features and Functions 
+Frequency Modulation (FM) 
+76
+Carrier Waveform Shape 
+ FM carrier shape: Sine, Square, Triangle, Ramp, or Arbitrary
+waveform. The default is Sine. 
+ You cannot use the noise function or dc volts as the carrier waveform.
+ Front-Panel Operation: Press any of the front-panel function keys
+except Noise . For arbitrary waveforms, the Arb key selects the
+waveform that is currently downloaded. 
+ Remote Interface Operation:
+ FUNCtion:SHAPe {SINusoid|SQUare|TRIangle|RAMP|USER}
+You can also use the APPLy command to select the function,
+frequency, amplitude, and offset with a single command.
+ 3
+Chapter 3 Features and Functions 
+Frequency Modulation (FM) 
+77
+Carrier Frequency
+ Carrier frequency: 10 mHz to 15 MHz (100 kHz for triangle
+and ramp). The default is 1 kHz.
+ For arbitrary waveforms, the maximum carrier frequency depends on
+the number of points specified in the waveform. The five built-in
+arbitrary waveforms can be output at a maximum of 5 MHz. 
+ The carrier frequency must always be greater than or equal to the
+peak frequency deviation. If you attempt to set the carrier frequency
+to a value less than the deviation, the function generator will automatically adjust the carrier frequency to equal the present deviation. 
+From the front panel, “MIN VALUE” is displayed and the carrier
+frequency is adjusted. From the remote interface, a -221, “Settings
+conflict” error is generated and the carrier frequency is adjusted. 
+ The sum of the carrier frequency and peak frequency deviation must
+be less than or equal to the maximum frequency for the selected
+function plus 100 kHz (15.1 MHz for sine and square, 200 kHz for
+triangle and ramp, and 5.1 MHz for arbitrary waveforms). If you
+attempt to set the carrier frequency to a value that is not valid,
+the function generator will automatically adjust the carrier frequency
+to equal the present deviation.
+From the front panel, “MAX VALUE” is displayed and the deviation is
+adjusted. From the remote interface, a -221, “Settings conflict” error is
+generated and the deviation is adjusted. 
+ Front-Panel Operation: Press the Freq key to select any valid
+frequency for the selected function (the present amplitude and offset
+voltage are used). 
+ Remote Interface Operation:
+ FREQuency {<frequency>|MINimum|MAXimum}
+Number of Arb Points
+8 to 8,192 (8k)
+8,193 to 12,287 (12k)
+12,288 to 16,000
+Minimum Frequency
+ 10 mHz
+ 10 mHz
+ 10 mHz
+Maximum Frequency
+ 5 MHz
+ 2.5 MHz
+ 200 kHz
+Chapter 3 Features and Functions 
+Frequency Modulation (FM) 
+78
+Modulating Waveform Shape
+The function generator will accept only an internal modulating signal. 
+ Modulating waveform shape (internal source): Sine, Square,
+Triangle, Ramp, Noise, or Arbitrary waveform. The default is Sine. 
+ You can use the noise function as the modulating waveform.
+However, you cannot use the noise function or dc volts as the carrier
+waveform.
+ Front-Panel Operation: After enabling FM, press Recall Menu to go
+directly to the FM SHAPE command in the menu.
+ 3: FM SHAPE (MOD MENU)
+ Remote Interface Operation:
+FM:INTernal:FUNCtion {SINusoid|SQUare|TRIangle|RAMP|NOISe|USER}
+Modulating Waveform Frequency
+The function generator will accept only an internal modulating signal. 
+ Modulating frequency (internal source): 10 mHz to 10 kHz.
+The default is 10 Hz.
+ The sync signal for FM is referenced to the modulating signal (not the
+carrier). A momentary TTL “high” pulse (> 200 ns) is output at each
+zero-crossing point of the modulating signal. The signal is output
+from the front-panel SYNC terminal. 
+ Front-Panel Operation: Press Shift Freq to set the modulating
+frequency (the value is displayed for approximately 10 seconds). 
+Before setting the modulating frequency from the front panel,
+you must have FM enabled. If you attempt to set the frequency when
+FM is not enabled, “SELECT AM, FM” is displayed.
+ Remote Interface Operation: 
+ FM:INTernal:FREQuency {<frequency>|MINimum|MAXimum}
+ 3
+Chapter 3 Features and Functions 
+Frequency Modulation (FM) 
+79
+Peak Frequency Deviation
+The peak frequency deviation represents the variation in frequency of
+the modulating waveform from the carrier frequency.
+ Peak frequency deviation: 10 mHz to 7.5 MHz. The default is 100 Hz. 
+ The carrier frequency must always be greater than or equal to the
+peak frequency deviation. If you attempt to set the deviation to a
+value greater than the carrier frequency (with FM enabled), the
+function generator will automatically adjust the deviation to equal
+the present carrier frequency. 
+From the front panel, “MAX VALUE” is displayed and the deviation is
+adjusted. From the remote interface, a -221, “Settings conflict” error is
+generated and the deviation is adjusted.
+ The sum of the carrier frequency and peak frequency deviation must
+be less than or equal to the maximum frequency for the selected
+function plus 100 kHz (15.1 MHz for sine and square, 200 kHz for
+triangle and ramp, and 5.1 MHz for arbitrary waveforms). If you
+attempt to set the deviation to a value that is not valid, the function
+generator will automatically adjust the deviation to the maximum
+value allowed with the present carrier frequency.
+From the front panel, “MAX VALUE” is displayed and the deviation is
+adjusted. From the remote interface, a -221, “Settings conflict” error is
+generated and the deviation is adjusted. 
+ Front-Panel Operation: Press Shift Level to set the peak deviation
+(the value is displayed for approximately 10 seconds). 
+Before setting the deviation from the front panel, you must have
+FM enabled. If you attempt to set the deviation when FM is not
+enabled, “SELECT AM, FM” is displayed.
+ Remote Interface Operation:
+ FM:DEViation {<peak deviation in Hz>|MINimum|MAXimum}
+Chapter 3 Features and Functions 
+Frequency Modulation (FM) 
+80
+Burst Modulation
+You can configure the function generator to output a waveform with a
+specified number of cycles, called a burst. You can output the burst at a
+rate determined by the internal rate generator or an external signal
+applied to the rear-panel connector. The function generator can produce
+a burst using sine, square, triangle, ramp, and arbitrary waveforms.
+For more information on the fundamentals of Burst Modulation,
+refer to chapter 7, “Tutorial”. 
+You can use burst modulation in the following two modes. The function
+generator enables one burst mode at a time based on the trigger source
+and burst source that you select (see the table below).
+ Triggered Burst Mode: In this mode, the function generator outputs
+a waveform with a specified number of cycles (burst count) each time
+a trigger is received. After the specified number of cycles has been
+output, the function generator waits for the next trigger. You can
+configure the function generator to accept an internal trigger or you
+can send the trigger externally by pressing the front-panel Single key
+or by applying a trigger signal to the rear-panel Ext Trig terminal.
+At power-on, the internally-triggered burst mode is enabled.
+ External Gated Burst Mode: In this mode, the output waveform is
+either “on” or “off ” based on the level of the external signal applied to
+the rear-panel Ext Trig terminal. When the gate signal is true,
+the function generator outputs a continuous waveform. When the
+gate signal is false, the output is turned off.
+Trigger Source
+(TRIG:SOUR)
+Burst Source
+(BM:SOUR)
+Burst Count
+(BM:NCYC)
+Burst Rate
+(BM:INT:RATE)
+Burst Phase
+(BM:PHAS)
+External Triggered Mode External Internal Available Not Used Available
+Internal Triggered Mode Internal Internal Available Available Available
+External Gated Mode Internal External Not Used Not Used Not Used
+ 3
+Chapter 3 Features and Functions 
+Burst Modulation
+81
+Burst Trigger Source
+In the triggered burst mode, the function generator outputs a waveform
+with the specified number of cycles (burst count) each time a trigger is
+received. After the specified number of cycles has been output, the
+function generator waits for the next trigger while outputting no signal
+(zero volts or the dc offset level). At power-on, the internally-triggered
+burst mode is enabled.
+ Trigger source: Internal, Single, or External. The default is Internal.
+ In the triggered burst mode, the “burst source” is Internal.
+ When the internal trigger source is selected, the frequency at which
+the burst is generated is determined by the burst rate parameter.
+The burst rate frequency defines the interval between bursts. 
+ Pressing Single to enable the single trigger mode also enables the
+external trigger mode. External triggering is like the front-panel
+single trigger mode except that you apply a trigger signal to the
+rear-panel Ext Trig terminal. The function generator is triggered on
+the rising edge of a TTL pulse.
+ The Trig annunciator turns on when the function generator is waiting
+for a single or external trigger.
+ When the single or external trigger source is selected, the burst count
+and burst phase remain in effect but the burst rate is ignored. 
+ When the external gate source is selected (“gated” burst mode), the
+specified trigger source is ignored. The external gated mode overrides
+the triggered mode source.
+ Front-Panel Operation: Pressing Single to enable the single 
+trigger mode also enables the external trigger mode. 
+Press Shift Internal to enable the internal trigger mode.
+ Remote Interface Operation: 
+ TRIGger:SOURce {IMMediate|EXTernal|BUS}
+See “Triggering” on page 98 for more information. 
+Chapter 3 Features and Functions 
+Burst Modulation
+82
+Burst Source
+In the external gated burst mode, the output waveform is either
+“on” or “off ” based on the level of the external signal applied to the
+rear-panel Ext Trig terminal. When the gate signal is true, the function
+generator outputs a continuous waveform. When the gate signal is false,
+the output is turned off. 
+ Burst source: Internal or External Gate. The default is Internal. 
+ When the internal burst source is selected, the external gated mode
+is disabled. 
+ When the external gate source is selected, the output is enabled or
+disabled based on the logic level of the gate signal applied to the
+Ext Trig terminal. When the gate signal is true (TTL high),
+the function generator outputs a continuous waveform. When the
+gate signal is false (TTL low), the output is turned off (zero volts or
+the dc offset level).
+ When the external gate source is selected, the burst count, burst rate,
+burst phase, and burst trigger source are ignored (these parameters
+are used for the triggered burst mode only). 
+ The Ext annunciator turns on when the function generator is waiting
+for the external gate signal. 
+ Front-Panel Operation: 
+ 7: BURST SRC (MOD MENU)
+ Remote Interface Operation: 
+ BM:SOURce {INTernal|EXTernal}
+ 3
+Chapter 3 Features and Functions 
+Burst Modulation
+83
+To Select Burst Modulation
+ The Burst annunciator turns on when burst modulation is enabled.
+ Only one modulation mode can be enabled at a time. When you
+enable the burst mode, the previous modulation mode is turned off. 
+ Front-Panel Operation: Enable burst modulation before you set up
+the other modulation parameters. Press Shift Burst to output the
+burst using the present settings for the carrier frequency, output
+amplitude, and offset voltage.
+ Remote Interface Operation: To ensure proper operation, you should
+enable the burst mode after you have set up the other modulation
+parameters. 
+ BM:STATe {OFF|ON}
+Burst Carrier Frequency
+The carrier frequency defines the repetition rate of the burst waveform
+in the triggered and external gated modes. In the triggered mode, the
+number of cycles specified by the burst count are output at the frequency
+of the carrier signal. In the external gated mode, the carrier frequency is
+output when the external gate signal is true (TTL high).
+Keep in mind that the carrier frequency is different than the “burst rate”
+which specifies the interval between bursts (triggered mode only).
+ Carrier frequency: 10 mHz to 5 MHz (100 kHz for triangle and ramp).
+The default is 1 kHz. You can use sine, square, ramp, triangle, or
+arbitrary waveforms for the carrier waveshape.
+ Be sure to note the restrictions for carrier frequency and
+burst count shown on the following pages. 
+Chapter 3 Features and Functions 
+Burst Modulation
+84
+ For arbitrary waveforms used as the carrier waveform, the maximum
+frequency depends on the number of points specified in the waveform.
+The five built-in arbitrary waveforms can be output at a maximum
+of 5 MHz (be sure to note the restrictions below). 
+ 
+ For sine, square, and arbitrary waveforms (does not apply to ramp
+and triangle waveforms), the relationship between the carrier
+frequency and the minimum burst count is shown below. 
+ 
+ If you attempt to set the carrier frequency to a value that is not valid,
+the function generator will automatically adjust the frequency to the
+maximum value allowed with the present burst count. 
+From the front panel, “MAX VALUE” is displayed and the carrier
+frequency is adjusted. From the remote interface, a -221, “Settings
+conflict” error is generated and the carrier frequency is adjusted.
+Number of Arb Points
+8 to 8,192 (8k)
+8,193 to 12,287 (12k)
+12,288 to 16,000
+Minimum Frequency
+ 10 mHz
+ 10 mHz
+ 10 mHz
+Maximum Frequency
+ 5 MHz
+ 2.5 MHz
+ 200 kHz
+ Carrier 
+ Frequency
+10 mHz to 1 MHz
+>1 MHz to 2 MHz
+>2 MHz to 3 MHz
+>3 MHz to 4 MHz
+>4 MHz to 5 MHz
+ Minimum 
+Burst Count
+ 1
+ 2
+ 3
+ 4
+ 5
+For sine, square, and 
+arbitrary waveforms only.
+ 3
+Chapter 3 Features and Functions 
+Burst Modulation
+85
+Carrier Frequency
+(continued)
+ For all waveforms used with burst, if the carrier frequency is set
+less than or equal to 100 Hz, the following relationship applies. 
+ Burst Count
+Carrier Frequency  500 seconds For Carrier  100 Hz
+If you attempt to set the carrier frequency to a value that is not valid,
+the function generator will automatically adjust the frequency to the
+minimum value allowed with the present burst count.
+From the front panel, “MIN VALUE” is displayed and the frequency is
+adjusted. From the remote interface, a -221, “Settings conflict” error is
+generated and the frequency is adjusted. 
+ For the triggered burst mode, the sync signal is a TTL “low” while the
+specified number of cycles is output (for the duration of the burst).
+After the specified number of cycles has been output, the sync signal
+goes “high” until the next burst. The sync signal is output from the
+front-panel SYNC terminal. 
+ For the external gated burst mode, the sync signal is a TTL “high”
+when the output is positive, relative to zero volts (or the dc offset value).
+The signal is a TTL “low” when the output is negative, relative to
+zero volts (or the dc offset value). The sync signal is output from the
+front-panel SYNC terminal. 
+ Front-Panel Operation: Press the Freq key and select any valid
+frequency for the selected function (the present amplitude and offset
+voltage are used). 
+ Remote Interface Operation: 
+ FREQuency {<frequency>|MINimum|MAXimum}
+You can also use the APPLy command to select the function,
+frequency, amplitude, and offset of the carrier with a single command.
+Chapter 3 Features and Functions 
+Burst Modulation
+86
+Burst Count
+The burst count defines the number of cycles to be output per burst.
+Used only in the triggered burst mode (internal or external source).
+Certain combinations of burst count and carrier frequency are not 
+allowed. If you attempt to specify a burst count that is not valid, 
+the function generator will automatically adjust the count to 
+the maximum value allowed with the present carrier frequency. 
+Make sure you note the restrictions in “Burst Carrier Frequency” starting
+on page 85 before setting the burst count. 
+ Burst count: 1 to 50,000 cycles, in 1 cycle increments. You can also
+select an infinite burst count. The default is 1 cycle.
+ When the internal trigger source is selected, the specified number of
+cycles is output continuously at a rate determined by the burst rate
+setting. The burst rate frequency defines the interval between bursts. 
+ When the single or external trigger source is selected, the burst count
+and burst phase remain in effect but the burst rate is ignored. The
+specified number of cycles is output each time Single is pressed or
+when a trigger signal is applied to the Ext Trig terminal. The function
+generator is triggered on the rising edge of a TTL pulse.
+ When the external gate burst source is selected, the burst count,
+burst rate, burst phase, and burst trigger source are ignored
+(these parameters are used for the triggered burst mode only). 
+ Front-Panel Operation:
+ 4: BURST CNT (MOD MENU) 
+ Remote Interface Operation: 
+ BM:NCYCles {<# cycles>|INFinity|MINimum|MAXimum}
+ 3
+Chapter 3 Features and Functions 
+Burst Modulation
+87
+Burst Rate
+The burst rate defines the frequency at which internally triggered bursts
+are generated. The burst rate frequency defines the interval between
+bursts. Used only in the internal triggered burst mode.
+Keep in mind that the burst rate is different than the “carrier frequency”
+which specifies the frequency of the bursted signal. 
+ Burst rate: 10 mHz to 50 kHz. The default is 100 Hz.
+ The burst rate setting is used only when internal triggering is
+enabled (triggered mode). The burst rate is ignored when single
+triggering or external triggering is enabled.
+ When the single or external trigger source is selected (triggered mode),
+the burst count and burst phase remain in effect but the burst rate
+is ignored. 
+ When the external gate burst source is selected (“gated” burst mode),
+the burst count, burst rate, burst phase, and burst trigger source are
+ignored (these parameters are used for the triggered burst mode only).
+ It is possible to specify a burst rate which is too fast for the function
+generator to output with the specified carrier frequency and burst
+count. If the burst rate is too high, the function generator will
+internally adjust it as needed to continuously re-trigger the burst.
+The adjustment is handled internally by the function generator
+(the burst rate displayed or queried will be the same as specified).
+ Front-Panel Operation:
+ 5: BURST RATE (MOD MENU) 
+ Remote Interface Operation: 
+ BM:INTernal:RATE {<frequency>|MINimum|MAXimum}
+Chapter 3 Features and Functions 
+Burst Modulation
+88
+Burst Phase
+The burst phase defines the starting phase of the burst. 
+ Burst phase: -360 degrees to +360 degrees, in 0.001 degree increments.
+The default is 0 degrees.
+ For sine, square, triangle, and ramp waveforms, 0 degrees is the point
+at which the waveform crosses zero volts (or the dc offset value), in a
+positive-going direction. 
+ For arbitrary waveforms, 0 degrees is the first data point downloaded
+to memory.
+ When the external gate source is selected (“gated” burst mode),
+the burst count, burst rate, burst phase, and burst trigger source are
+ignored (these parameters are used for the triggered burst mode only).
+ Front-Panel Operation: 
+ 6: BURST PHAS (MOD MENU)
+ Remote Interface Operation: 
+ BM:PHASe {<degrees>|MINimum|MAXimum}
+ 3
+Chapter 3 Features and Functions 
+Burst Modulation
+89
+Frequency-Shift Keying (FSK) Modulation
+You can configure the function generator to “shift” its output frequency
+between two preset values using FSK modulation. The rate at which the
+output shifts between the two frequencies (called the “carrier frequency”
+and the “hop frequency”) is determined by the internal rate generator or
+the signal level on the rear-panel FSK terminal. The function generator
+can produce an FSK waveform using sine, square, triangle, ramp, and
+arbitrary waveforms.
+For more information on the fundamentals of FSK Modulation,
+refer to chapter 7, “Tutorial”. 
+To Select FSK Modulation
+ The FSK annunciator turns on when FSK is enabled.
+ Only one modulation mode can be enabled at a time. When you
+enable FSK, the previous modulation mode is turned off. 
+ Front-Panel Operation: Enable FSK before you set up the other
+modulation parameters. Press Shift FSK to output the waveform
+using the present settings for frequency, amplitude, and offset voltage.
+ Remote Interface Operation: To ensure proper operation, you should
+enable FSK after you have set up the other modulation parameters.
+ FSKey:STATe {OFF|ON}
+Chapter 3 Features and Functions 
+Frequency-Shift Keying (FSK) Modulation
+90
+FSK Carrier Frequency 
+ Carrier frequency: 10 mHz to 15 MHz (100 kHz for triangle
+and ramp). The default is 1 kHz. You can use sine, square, ramp,
+triangle, or arbitrary waveforms for the carrier waveform.
+ For arbitrary waveforms, the maximum carrier frequency depends on
+the number of points specified in the waveform. The five built-in
+arbitrary waveforms can be output at a maximum of 5 MHz. 
+ 
+ For an externally-controlled FSK waveform, the carrier frequency is
+output when a “low” TTL level is applied to the FSK terminal. The hop
+frequency is output when a “high” TTL level is applied.
+ For FSK, the sync signal is referenced to the FSK “hop” signal (not the
+carrier). A momentary TTL “high” pulse (> 200 ns) is output on the
+transition to the “hop” frequency. The signal is output from the frontpanel SYNC terminal. 
+ Front-Panel Operation: Press the Freq key and select any valid
+frequency for the selected function (the present amplitude and offset
+voltage are used). 
+ Remote Interface Operation: 
+ FREQuency {<frequency>|MINimum|MAXimum}
+You can also use the APPLy command to select the function, frequency,
+amplitude, and offset of the carrier with a single command.
+Number of Arb Points
+8 to 8,192 (8k)
+8,193 to 12,287 (12k)
+12,288 to 16,000
+Minimum Frequency
+ 10 mHz
+ 10 mHz
+ 10 mHz
+Maximum Frequency
+ 5 MHz
+ 2.5 MHz
+ 200 kHz
+ 3
+Chapter 3 Features and Functions 
+Frequency-Shift Keying (FSK) Modulation
+91
+FSK “Hop” Frequency
+ Hop frequency: 10 mHz to 15 MHz (100 kHz for triangle and ramp).
+The default is 100 Hz. You can use sine, square, ramp, triangle, or
+arbitrary waveforms for the hop frequency waveshape.
+ For arbitrary waveforms, the maximum hop frequency depends on
+the number of points specified in the waveform. The five built-in
+arbitrary waveforms can be output at a maximum of 5 MHz. 
+ 
+ For an externally-controlled FSK waveform, the carrier frequency is
+output when a “low” TTL level is applied to the FSK terminal. The hop
+frequency is output when a “high” TTL level is applied.
+ For FSK, the sync signal is referenced to the FSK “hop” signal (not the
+carrier). A momentary TTL “high” pulse (> 200 ns) is output on the
+transition to the “hop” frequency. The signal is output from the frontpanel SYNC terminal. 
+ Front-Panel Operation: After enabling FSK, press Recall Menu to go
+directly to the FSK FREQ command in the menu.
+ 8: FSK FREQ (MOD MENU)
+ Remote Interface Operation: 
+ FSKey:FREQuency {<frequency>|MINimum|MAXimum}
+Number of Arb Points
+8 to 8,192 (8k)
+8,193 to 12,287 (12k)
+12,288 to 16,000
+Minimum Frequency
+ 10 mHz
+ 10 mHz
+ 10 mHz
+Maximum Frequency
+ 5 MHz
+ 2.5 MHz
+ 200 kHz
+Chapter 3 Features and Functions 
+Frequency-Shift Keying (FSK) Modulation
+92
+FSK Rate
+The FSK rate is the rate at which the output frequency “shifts” between
+the carrier frequency and the hop frequency when you select the
+internal FSK source.
+ FSK rate (internal source): 10 mHz to 50 kHz. The default is 10 Hz. 
+ The FSK rate is ignored when the external source is selected.
+ Front-Panel Operation: 
+ 9: FSK RATE (MOD MENU)
+ Remote Interface Operation: 
+ FSKey:INTernal:RATE {<rate in Hz>|MINimum|MAXimum}
+FSK Source
+ FSK source: Internal or External. The default is Internal. 
+ When the internal source is selected, the rate at which the output
+frequency “shifts” between the carrier frequency and hop frequency
+is determined by the FSK rate specified. 
+ When the external source is selected, the output frequency is
+determined by the signal level on the rear-panel FSK terminal.
+When a “low” TTL level is present, the carrier frequency is output.
+When a “high” TTL level is present, the hop frequency is output. 
+ The maximum external FSK rate is 1 MHz.
+ The Ext annunciator turns on when the function generator is waiting
+for an external trigger signal. 
+ Front-Panel Operation: 
+ 10: FSK SRC (MOD MENU) 
+ Remote Interface Operation: 
+ FSKey:SOURce {INTernal|EXTernal}
+ 3
+Chapter 3 Features and Functions 
+Frequency-Shift Keying (FSK) Modulation
+93
+Frequency Sweep 
+In the frequency sweep mode, the function generator “steps” from the
+start frequency to the stop frequency at a sweep rate which you specify.
+You can sweep up or down in frequency, and with either linear or
+logarithmic spacing. You can also configure the function generator to
+output a single sweep (one pass from start frequency to stop frequency)
+by applying an external trigger. The function generator can produce a
+frequency sweep for sine, square, triangle, ramp, or arbitrary waveforms.
+For more information on the fundamentals of frequency sweeps, refer to
+chapter 7, “Tutorial”. 
+To Select Sweep Modulation
+ The Swp annunciator turns on when the sweep mode is enabled. 
+ Only one modulation mode can be enabled at a time. When you
+enable the sweep mode, the previous modulation mode is turned off. 
+ Front-Panel Operation: Enable the sweep mode before you set up the
+other sweep parameters. Press Shift Sweep to output a sweep using
+the present settings for amplitude and offset voltage.
+ Remote Interface Operation: To ensure proper operation, you should
+enable the sweep mode after you have set up the other modulation
+parameters. 
+ SWEep:STATe {OFF|ON}
+Chapter 3 Features and Functions 
+Frequency Sweep 
+94
+Start Frequency and Stop Frequency
+The start frequency and stop frequency set the upper and lower
+frequency bounds for the sweep. The function generator begins at the
+start frequency, sweeps to the stop frequency, and then resets back to
+the start frequency.
+ Start and Stop frequencies: 10 mHz to 15 MHz (100 kHz for triangle
+and ramp). The sweep is phase continuous over the full frequency
+range. The default start frequency is 100 Hz. The default stop
+frequency is 1 kHz. The *RST command sets the start frequency to
+10 mHz (minimum) and the stop frequency to 15 MHz (maximum). 
+ For arbitrary waveforms, the maximum start or stop frequency
+depends on the number of points specified in the waveform. The five
+built-in arbitrary waveforms can be output at a maximum of 5 MHz. 
+ 
+ To sweep up in frequency, set the start frequency < stop frequency.
+To sweep down in frequency, set the start frequency > stop frequency.
+ The sync signal is a TTL “low” at the start of the sweep (when the
+start frequency is output) and is a TTL “high” at the end of the sweep
+(when the stop frequency is output). The signal is output from the
+front-panel SYNC terminal. 
+ Front-Panel Operation: After enabling sweeps, press Recall Menu to
+go directly to the START F command in the menu.
+ 1: START F (SWP MENU) 
+ 2: STOP F (SWP MENU)
+ Remote Interface Operation: 
+ FREQuency:STARt {<frequency>|MINimum|MAXimum}
+ FREQuency:STOP {<frequency>|MINimum|MAXimum}
+Number of Arb Points
+8 to 8,192 (8k)
+8,193 to 12,287 (12k)
+12,288 to 16,000
+Minimum Frequency
+ 10 mHz
+ 10 mHz
+ 10 mHz
+Maximum Frequency
+ 5 MHz
+ 2.5 MHz
+ 200 kHz
+ 3
+Chapter 3 Features and Functions 
+Frequency Sweep 
+95
+Sweep Time
+The sweep time specifies the number of seconds required to sweep from
+the start frequency to the stop frequency. The number of frequency
+points in the sweep depends on the sweep time you select and is
+automatically calculated by the function generator. 
+ Sweep time: 1 ms to 500 seconds. The default is 1 second.
+ The function generator computes between 2,048 and 4,096 frequency
+points from the start frequency to the stop frequency. 
+ Front-Panel Operation: 
+ 3: SWP TIME (SWP MENU)
+ Remote Interface Operation: 
+ SWEep:TIME {<seconds>|MINimum|MAXimum}
+Sweep Mode
+You can sweep with either linear or logarithmic spacing. The output
+frequency of a linear sweep changes linearly during the duration of the
+sweep. For logarithmic spacing, the output frequency changes
+exponentially during the duration of the sweep.
+ Sweep mode: Linear or Logarithmic. The default is Linear. 
+ Front-Panel Operation: 
+ 4: SWP MODE (SWP MENU)
+ Remote Interface Operation: 
+ SWEep:SPACing {LINear|LOGarithmic}
+Chapter 3 Features and Functions 
+Frequency Sweep 
+96
+Sweep Trigger Source
+In the triggered sweep mode, the function generator outputs a single
+sweep each time a trigger is received. After one sweep from the start
+frequency to the stop frequency, the function generator waits for the
+next trigger while outputting the start frequency.
+ Sweep trigger source: Internal, Single, or External. The default
+is Internal. 
+ When the internal trigger source is enabled (default), the function
+generator outputs a continuous sweep at a rate determined by the
+sweep rate specified. 
+ Pressing Single to enable the single trigger mode also enables the
+external trigger mode. External triggering is like the front-panel
+single trigger mode except that you apply a trigger signal to the
+rear-panel Ext Trig terminal. The function generator is triggered on
+the rising edge of a TTL pulse.
+ The Trig annunciator turns on when the function generator is waiting
+for a single or external trigger.
+ Front-Panel Operation: Pressing Single to enable the single 
+trigger mode also enables the external trigger mode. 
+Press Shift Internal to enable the internal trigger mode.
+ Remote Interface Operation: 
+ TRIGger:SOURce {IMMediate|EXTernal|BUS}
+See “Triggering” on page 98 for more information. 
+ 3
+Chapter 3 Features and Functions 
+Frequency Sweep 
+97
+Triggering 
+Applies only to bursts and frequency sweep. You can issue triggers for
+bursts and sweeps using internal triggering, single triggering, or
+external triggering.
+ Internal or “automatic” triggering is enabled when you turn on the
+function generator. In this mode, the function generator outputs
+continuously when the burst mode or sweep mode is selected. 
+ Single triggering outputs one burst or initiates one sweep each time
+you press Single from the front-panel. Continue pressing this key to
+re-trigger the function generator. 
+ Pressing Single to enable the single trigger mode also enables the
+external trigger mode. External triggering is like the front-panel
+single trigger mode except that you apply a trigger signal to the
+rear-panel Ext Trig terminal. The function generator is triggered on
+the rising edge of a TTL pulse.
+ The Single key is disabled when in remote (the Rmt annunciator
+turns on when in remote) and when a function other than burst or
+sweep is selected. 
+Chapter 3 Features and Functions 
+Triggering 
+98
+Trigger Source Choices 
+Applies only to burst and sweep. You must specify the source from which
+the function generator will accept a trigger. 
+ From the front panel, the function generator will accept a single
+trigger, a hardware trigger from the Ext Trig terminal, or
+continuously output bursts or sweeps using the internal trigger.
+At power-on, internal trigger is selected. 
+ From the remote interface, the function generator will accept
+a software (bus) trigger, a hardware trigger from the Ext Trig
+terminal, or an immediate internal trigger.
+ The trigger source setting is stored in volatile memory; the source is
+set to internal trigger (front panel) or immediate (remote interface)
+when power has been off or after a remote interface reset.
+ To select the trigger source from the remote interface, use the
+following command. The APPLy command automatically sets the
+trigger source to IMMediate .
+ TRIGger:SOURce {IMMediate|EXTernal|BUS}
+Internal Triggering In this trigger mode, the function generator
+continuously outputs the burst or sweep (as specified by the burst rate
+or sweep time). This is the power-on trigger source for both front-panel
+and remote interface use. 
+To select the internal trigger source from the remote interface, use the
+following command. The APPLy command automatically sets the
+trigger source to IMMediate.
+ "TRIGGER:SOURCE IMMEDIATE"
+ 3
+Chapter 3 Features and Functions 
+Triggering 
+99
+Single Triggering In the single trigger mode (front panel only),
+you can manually trigger the function generator by pressing the
+front-panel Single key. The function generator outputs one burst or
+initiates one sweep each time you press the key. The Trig
+annunciator turns on when the function generator is waiting for
+a single trigger.
+The front-panel Single key is disabled when in remote.
+External Triggering In this trigger mode, the function generator will
+accept a hardware trigger applied to the Ext Trig terminal. The function
+generator outputs one burst or initiates one sweep each time Ext Trig
+receives the rising edge of a TTL pulse.
+See also “Ext Trig/FSK/Burst Input Terminal,” on page 102.
+ Front-Panel Operation: The external trigger mode is like the single
+trigger mode except that you apply the trigger to the Ext Trig
+terminal. Pressing Single to enable the single trigger mode also
+enables the external trigger mode. The Trig annunciator turns on
+when the function generator is waiting for an external trigger. 
+The front-panel Single key is disabled when in remote. 
+ Remote Interface Operation: 
+ TRIGger:SOURce EXTernal
+Chapter 3 Features and Functions 
+Triggering 
+100
+Software (Bus) Triggering The bus trigger mode is available only
+from the remote interface. This mode is similar to the single trigger
+mode from the front panel, but you trigger the function generator by
+sending a bus trigger command. The function generator outputs one burst
+or initiates one sweep each time the trigger command is received.
+ To select the bus trigger source, send the following command.
+ "TRIGGER:SOURCE BUS" 
+ To trigger the function generator from the remote interface (GPIB or
+RS-232), send the *TRG (trigger) command. 
+ You can also trigger the function generator from the GPIB interface
+by sending the IEEE-488 Group Execute Trigger (GET) message.
+The following statement shows how to send a GET using BASIC. 
+ TRIGGER 710 Group Execute Trigger
+ The following statement shows how to send a trigger from the GPIB
+interface using the GPIB Command Library for C or QuickBASIC.
+ IOTRIGGER (710)
+ 3
+Chapter 3 Features and Functions 
+Triggering 
+101
+Ext Trig / FSK / Burst Input Terminal 
+This terminal is used in the following modes:
+ Triggered Sweep Mode: Press Single or execute TRIG:SOUR EXT
+from the remote interface to enable the triggered sweep mode
+(sweeps must be enabled). When the rising edge of a TTL pulse is
+received on the Ext Trig terminal, the function generator outputs a
+single sweep. The Trig annunciator turns on when the function
+generator is waiting for a trigger.
+ Externally-Modulated FSK Mode: To enable the externallymodulated mode, select “FSK SRC EXT” from the front-panel MOD
+MENU or execute FSK:SOUR EXT from the remote interface when
+FSK is enabled. When a low TTL level is present, the FSK carrier
+frequency is output. When a high TTL level is present, the FSK “hop”
+frequency is output. The Ext annunciator turns on when selected.
+ Triggered Burst Mode: Press Single or execute TRIG:SOUR EXT
+from the remote interface to enable the triggered burst mode
+(burst must be enabled). When the rising edge of a TTL pulse is
+received, the function generator outputs a burst waveform with the
+specified number of cycles. The Trig annunciator turns on when the
+function generator is waiting for a trigger.
+ External Gated Burst Mode: To enable the external gated mode,
+select “BURST SRC EXT GATED” from the front-panel MOD MENU
+or execute BM:SOUR EXT from the remote interface when burst is
+enabled. When a high TTL level is present, the function generator
+outputs the carrier waveform. When a low TTL level is present, the
+output is disabled. The Ext annunciator turns on when selected.
+INPUT
+> 1 s
+0 V
+5 V
+Chapter 3 Features and Functions 
+Triggering 
+102
+Arbitrary Waveforms 
+There are five built-in arbitrary waveforms stored in non-volatile
+memory. You can also download up to four user-defined waveforms into
+non-volatile memory. Each waveform can contain between 8 and 16,000
+data points. 
+Refer to chapter 7, “Tutorial”, for more information on the internal
+operation of downloading and outputting an arbitrary waveform.
+Creating and Storing an Arbitrary Waveform
+This section gives an example which shows you how to create and store
+an arbitrary waveform from the front panel. To download an arbitrary
+waveform from the remote interface, see “Arbitrary Waveform Commands”
+starting on page 174. For this example, you will create and store a pulse
+waveform containing 400 points.
+1 Turn on the menu.
+A: MOD MENU 
+2 Move across to the EDIT MENU choice on this level.
+C: EDIT MENU 
+3 Move down a level to the NEW ARB command.
+There are seven command choices available in the EDIT MENU.
+However, you can access only two of the choices (NEW ARB and DELETE)
+until you either clear volatile memory or load an existing user-defined
+waveform.
+1: NEW ARB
+
+ Menu On/Off 
+ Shift 
+ > > 
+ 3
+Chapter 3 Features and Functions 
+Arbitrary Waveforms 
+103
+4 Move down a level to the “PARAMETER” choices.
+The first parameter choice is “CLEAR MEM” for the NEW ARB command.
+If you have previously downloaded any user-defined waveforms, you will
+also see commands like “GET ARB1” on this level (to load the specified
+waveform into volatile memory).
+ CLEAR MEM
+5 Turn on the waveform edit mode.
+The function generator beeps and displays a message to show that the
+waveform edit mode is now enabled. You are then exited from the menu.
+ LOADING
+6 Use Recall Menu to return to the NEW ARB command.
+1: NEW ARB
+7 Move across to the POINTS command on this level.
+2: POINTS
+8 Move down a level and set the number of points to “400”.
+
+00400 PNTS
+
+ Enter 
+ Recall Menu 
+ Shift 
+ < 
+ > 
+
+Chapter 3 Features and Functions 
+Arbitrary Waveforms 
+104
+9 Save the change and turn off the menu.
+The function generator beeps and displays a message to show that the
+change is now in effect. You are then exited from the menu. 
+ COMPUTING
+10 Use Recall Menu to return to the POINTS command.
+2: POINTS
+For this example, the pulse waveform will be “high” for one-half of
+the cycle (for 200 of the 400 points). From the front panel, each waveform
+point is a floating-point value between -1 and +1, which correspond to
+the peak values of the waveform. To define the waveform points, use the
+LINE EDIT command in the EDIT MENU. The function generator
+temporarily rescales the waveform amplitude between -1 and +1 
+at 1 kHz. 
+11 Move across to the LINE EDIT command on this level.
+3: LINE EDIT
+12 Move down a level and set point “100” to a value of “1”.
+Use the left/right arrow keys to move between the point field (left) and
+the floating-point value (right). The comma ( , ) at the right side of the
+display indicates that the displayed value is the start point. For this
+example, the first 99 points in the waveform remain at “0”.
+ 00100:+1.0000,
+13 Press “Enter” to store the start point and move to the end point.
+ Enter 
+ Recall Menu 
+ Shift 
+ < 
+ > 
+ Enter 
+
+ 3
+Chapter 3 Features and Functions 
+Arbitrary Waveforms 
+105
+14 Increment to point “299” and set the end point to a value of “1”. 
+Use the left/right arrow keys to move between the point field (left) and
+the floating-point value (right). As you modify the value, the end point is
+output. When you press the Enter key, the line between the start point
+and end point is calculated, output, and stored. If you exit without
+pressing the Enter key, the start point and stop point are restored.
+ 00299:+1.0000
+15 Save the start and stop points and output the waveform.
+ COMPUTING
+16 Save the waveform and turn off the menu.
+The function generator beeps and displays a message to show that the
+waveform is now stored in volatile memory. You are then exited from
+the menu. 
+ EXITING
+17 Use Recall Menu to return to the LINE EDIT command.
+3: LINE EDIT
+18 Move across to the SAVE AS command on this level.
+6: SAVE AS
+ Menu On/Off 
+ Shift 
+ Recall Menu 
+ Shift 
+ < 
+ > > > 
+ Enter 
+Chapter 3 Features and Functions 
+Arbitrary Waveforms 
+106
+19 Move down a level to save the waveform in non-volatile memory.
+At this point, the pulse waveform is being output from volatile memory.
+You can store up to four user-defined waveforms in non-volatile memory.
+From the front panel, you can save the waveform using one of the
+following names: ARB1, ARB2, ARB3, or ARB4.
+ ARB1 *NEW*
+20 Save the waveform and turn off the menu.
+The function generator beeps and displays a message to show that the
+waveform is being saved. You are then exited from the menu. 
+ SAVING
+The waveform is now stored in non-volatile memory and is output
+from the function generator. The name that you used to store the
+waveform should appear in the waveform list (press Arb List ).
+
+ Enter 3
+Chapter 3 Features and Functions 
+Arbitrary Waveforms 
+107
+Additional Information on Arbitrary Waveforms
+ Press the Arb key to output the arbitrary waveform currently 
+selected (to scroll through the waveform choices and make a 
+selection, press Arb List ).
+ In addition to creating a new arbitrary waveform from the front
+panel, you can also edit any existing user-defined waveforms. You can
+edit waveforms created either from the front panel or from the
+remote interface. However, you cannot edit any of the five built-in
+arbitrary waveforms. 
+Use the “GET” option under the NEW ARB command in the EDIT MENU
+to load an existing user-defined waveform. Then, use the LINE EDIT,
+POINT EDIT, and INVERT commands to edit the waveform.
+ The INVERT command in the EDIT MENU takes the inverse of each
+point in the specified waveform by changing the sign. 
+ You can use the DELETE command in the EDIT MENU to delete any
+user-defined waveforms in volatile memory. A list of all user-defined
+waveforms appears when you move to the DELETE command.
+Chapter 3 Features and Functions 
+Arbitrary Waveforms 
+108
+System-Related Operations 
+This section gives information on topics such as power-down recall,
+self-test, error conditions, and front-panel display control. This
+information is not directly related to waveform generation but is an
+important part of operating the function generator.
+Power-Down Recall Mode
+When power is turned off, the function generator automatically stores
+its state in memory location “0”. You can configure the function
+generator to automatically recall the power-down state when power is
+restored. The recall mode is disabled when the function generator is
+shipped from the factory. 
+The power-down recall mode can be set from the front-panel only.
+ When the recall mode is disabled (factory setting), the function
+generator powers up in its default configuration (see page 123).
+When the recall mode is enabled, the function generator powers up
+in the power-down configuration. 
+ The power-down recall setting is stored in non-volatile memory,
+and does not change when power has been off or after a remote
+interface reset. 
+ The power-down recall mode “remembers” the function (including
+arbitrary waveforms), frequency, amplitude, dc offset, duty cycle,
+as well as any modulation parameters. 
+ Any arbitrary waveforms downloaded to “VOLATILE” memory are not
+remembered. However, if an arbitrary waveform is being output
+from non-volatile memory when the state is stored, the waveform
+data is stored. The stored waveform is output when the instrument
+state is recalled.
+ Front-Panel Operation: 
+ 2: POWER ON (SYS MENU)
+To enable the recall mode, select the “LAST STATE” choice.
+To disable the recall mode, select the “DEFAULT” choice.
+ 3
+Chapter 3 Features and Functions 
+System-Related Operations 
+109
+Error Conditions 
+When the front-panel ERROR annunciator turns on, one or more
+command syntax or hardware errors have been detected. A record of
+up to 20 errors can be stored in the function generator’s error queue. 
+See chapter 5, “Error Messages,” for a complete listing of the errors.
+ Errors are retrieved in first-in-first-out (FIFO) order. The first error
+returned is the first error that was stored. When you have read all
+errors from the queue, the ERROR annunciator turns off. The function
+generator beeps once each time an error is generated.
+ If more than 20 errors have occurred, the last error stored in the
+queue (the most recent error) is replaced with -350, “Too many errors”.
+No additional errors are stored until you remove errors from the
+queue. If no errors have occurred when you read the error queue,
+the function generator responds with +0, “No error”.
+ The error queue is cleared when power has been off or after a *CLS
+(clear status) command has been executed. The *RST (reset)
+command does not clear the error queue. 
+ Front-Panel Operation:
+ 3: ERROR (SYS MENU) 
+If the ERROR annunciator is on, press Shift < (Recall Menu) to read
+the errors stored in the queue. The errors are listed horizontally on
+the “PARAMETER” level. All errors are cleared when you go to the
+“PARAMETER” level and then turn off the menu. 
+ Remote Interface Operation: 
+ SYSTem:ERRor? Reads one error from the error queue
+Errors have the following format (the error string may contain
+up to 80 characters):
+ -113,"Undefined header" 
+ ERR 1: -113
+ First error in queue Error code
+Chapter 3 Features and Functions 
+System-Related Operations 
+110
+Self-Test 
+ A power-on self-test occurs automatically when you turn on the
+function generator. This limited test assures you that the function
+generator is operational. 
+ A complete self-test runs a series of tests and takes approximately
+10 seconds to execute. If all tests pass, you can have a high confidence
+that the function generator is fully operational.
+ If the complete self-test is successful, “PASS” is displayed on the front
+panel. If the self-test fails, “FAIL” is displayed and the ERROR
+annunciator turns on. See the Service Guide for instructions on
+returning the function generator to Agilent for service.
+ Front-Panel Operation: 
+ 4: TEST (SYS MENU) 
+Another way to perform the complete self-test from the front panel
+is as follows: Hold down Shift as you press the Power switch to turn
+on the function generator; hold down the key for more than 5 seconds.
+The self-test will begin when you release the key.
+ Remote Interface Operation: 
+ *TST?
+Returns “0” if the self-test passes or “1” if it fails. If the self-test fails,
+an error message is also generated with additional information on
+why the test failed. 
+ 3
+Chapter 3 Features and Functions 
+System-Related Operations 
+111
+Display Control 
+To speed up the rate at which the function generator can make
+configuration changes, or for security reasons, you may want to turn off
+the front-panel display. From the remote interface, you can also display
+a message containing up to 11 characters on the front panel.
+The display can be enabled/disabled from the remote interface only.
+ When the display is turned off, output parameters are not sent to the
+display and all annunciators except ERROR and Shift are disabled.
+Front-panel operation is otherwise unaffected by turning off the display.
+ The display state is stored in volatile memory; the display is always
+enabled when power has been off or after a remote interface reset. 
+ You can display a message on the front panel by sending a command
+from the remote interface. The function generator can display up to
+11 characters of the message on the front panel; any additional
+characters are truncated. Commas, periods, and semicolons share a
+display space with the preceding character, and are not considered
+individual characters. When a message is displayed, information
+relating to the output waveform (such as frequency and amplitude)
+is not sent to the display.
+ Sending a message to the display from the remote interface overrides
+the display state; this means that you can display a message even if
+the display is turned off.
+ The display state is automatically turned on when you return to the
+local (front panel) state. Press the Shift key or execute LOCAL 710
+from the remote interface to return to the local state.
+ Remote Interface Operation: 
+ DISPlay {OFF|ON} Disable/enable the display
+ DISPlay:TEXT <quoted string> Display the string enclosed in quotes
+ DISPlay:TEXT:CLEar Clear the displayed message
+The following command string shows how to display a message on the
+front panel.
+ "DISP:TEXT ’HELLO’"
+Chapter 3 Features and Functions 
+System-Related Operations 
+112
+Comma Separators 
+The function generator can display values on the front panel with or
+without a comma separator. This feature is available only from the
+front panel.
+ 15.000,000 MHz
+ The display format is stored in non-volatile memory, and does not
+change when power has been off or after a remote interface reset.
+The comma separator is enabled when the function generator is
+shipped from the factory.
+ Front-Panel Operation: 
+ 5: COMMA (SYS MENU)
+See also “To turn off the comma separator,” on page 52. 
+Firmware Revision Query 
+The function generator has three microprocessors for control of various
+internal systems. You can query the function generator to determine
+which revision of firmware is installed for each microprocessor.
+ The function generator returns three numbers. The first number is
+the firmware revision number for the main generator processor;
+the second is for the input/output processor; and the third is for the
+front-panel processor.
+ Front-Panel Operation: 
+ 6: REVISION (SYS MENU)
+ Remote Interface Operation:
+ *IDN? Returns “HEWLETT-PACKARD,33120A,0,X.X-X.X-X.X”
+Be sure to dimension a string variable with at least 40 characters.
+ 15.000000 MHz
+ With comma separator Without comma separator
+ (factory setting) 
+ X.X-X.X-X.X
+ 3
+Chapter 3 Features and Functions 
+System-Related Operations 
+113
+Remote Interface Configuration 
+This section gives information on configuring the remote interface.
+For information on programming the function generator over the remote
+interface, see chapter 4, “Remote Interface Reference,” starting on
+page 125. 
+GPIB Address 
+Each device on the GPIB (IEEE-488) interface must have a unique
+address. You can set the function generator’s address to any value
+between 0 and 30. The current address is displayed momentarily on the
+front panel when you turn on the function generator. The address is set to
+“10” when the function generator is shipped from the factory. 
+The GPIB address can be set from the front-panel only.
+ The address is stored in non-volatile memory, and does not change
+when power has been off or after a remote interface reset. 
+ Your GPIB bus controller has its own address. Be sure to avoid using
+the bus controller’s address for any instrument on the interface bus.
+Agilent controllers generally use address “21”.
+ Front-Panel Operation: 
+ 1: HPIB ADDR (I/O MENU)
+See also “To set the GPIB address,” on page 217.
+Chapter 3 Features and Functions 
+Remote Interface Configuration 
+114
+Remote Interface Selection 
+The function generator is shipped with both an GPIB (IEEE-488)
+interface and an RS-232 interface. Only one interface can be enabled at
+a time. The GPIB interface is selected when the function generator is
+shipped from the factory.
+The remote interface can be selected from the front-panel only.
+ The interface selection is stored in non-volatile memory, and does not
+change when power has been off or after a remote interface reset.
+ If you select the GPIB interface, you must select a unique address for
+the function generator. The current address is displayed momentarily
+on the front panel when you turn on the function generator.
+ Your GPIB bus controller has its own address. Be sure to avoid using
+the bus controller’s address for any instrument on the interface bus. 
+ If you enable the RS-232 interface, you must select the baud rate and
+parity to be used. “RS-232” is displayed momentarily on the front
+panel when you turn on the function generator if you have selected
+this interface.
+ Front-Panel Operation: 
+ 2: INTERFACE (I/O MENU)
+See also “To select the remote interface,” on page 218.
+Refer to “RS-232 Interface Configuration,” starting on page 195 for 
+more information on connecting the function generator to a computer,
+terminal, or modem over the RS-232 interface

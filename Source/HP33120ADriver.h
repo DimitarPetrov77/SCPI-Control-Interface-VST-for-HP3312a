@@ -51,7 +51,8 @@ public:
 
     // Basic SCPI commands
     void setWaveform(const std::string& waveform);
-    void setUserWaveform(const std::string& name);  // Select specific ARB waveform by name
+    void setUserWaveform(const std::string& name);  // Select specific ARB waveform by name AND change to USER shape
+    void selectUserWaveform(const std::string& name);  // Just select which ARB is active (doesn't change shape)
     void setFrequency(double freqHz);
     void setAmplitude(double ampVpp);
     void setOffset(double offsetV);
@@ -123,6 +124,7 @@ public:
     
 private:
     void write(const std::string& cmd);
+    void writeFast(const std::string& cmd);  // Fast write without error checking - for real-time slider updates
     std::string query(const std::string& cmd);
     
     // Mutex for thread safety (UI vs MIDI)

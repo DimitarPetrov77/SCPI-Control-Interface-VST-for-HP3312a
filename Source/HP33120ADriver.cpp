@@ -120,7 +120,9 @@ bool HP33120ADriver::connect(const std::string& resource)
     
     if (viSetAttribute)
     {
-        viSetAttribute((ViObject)sessionObj, 0x3FFF001A, 5000); // Timeout
+        // Set timeout to 500ms - short enough for UI responsiveness, long enough for most commands
+        // If device is slow or unresponsive, commands will fail quickly rather than blocking the UI
+        viSetAttribute((ViObject)sessionObj, 0x3FFF001A, 500); // 500ms timeout
     }
     
     connected = true;
@@ -166,29 +168,23 @@ void HP33120ADriver::write(const std::string& cmd)
         
         if (status != VI_SUCCESS)
         {
+            lastError = "Write failed: " + cmd;
             if (logCallback)
-                logCallback(cmd + " -> [Write Error: " + std::to_string(status) + "]");
+                logCallback("[ERROR] Command failed: " + cmd + " (status: " + std::to_string(status) + ")");
             return;
         }
         
         if (viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
         
-        // PERFORMANCE: Only query error response if verbose logging is enabled
-        // This eliminates 2ms delay per command for normal operation
-        // Error checking is still available when needed via verbose logging
-        if (verboseLogging && viPrintf && viRead)
+        // ALWAYS check for device errors (not just in verbose mode)
+        // This is important for user feedback - they need to know when commands fail
+        if (viPrintf && viRead)
         {
-            // Minimal delay only for device to be ready to respond
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            
-            // Directly query SYST:ERR? without going through query() to avoid recursion
+            // Query SYST:ERR? to check if device had any problems with the command
             status = viPrintf(sess, "SYST:ERR?\n");
             if (status == VI_SUCCESS && viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
             
-            // Minimal delay for read - let device respond as fast as it can
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            
-            char buffer[1024] = {0};
+            char buffer[256] = {0};
             ViUInt32 retCount = 0;
             status = viRead(sess, (ViBuf)buffer, sizeof(buffer) - 1, &retCount);
             
@@ -201,33 +197,82 @@ void HP33120ADriver::write(const std::string& cmd)
                 while (!response.empty() && (response.back() == '\n' || response.back() == '\r' || response.back() == ' '))
                     response.pop_back();
                 
-                // Log normal commands and their responses (like Python does)
-                // This shows: "FREQ 1000.0 -> +0,"No error""
-                if (logCallback && !response.empty())
+                // Check if there's an actual error (not "+0,No error")
+                bool hasError = !response.empty() && response[0] != '+' && response.find("No error") == std::string::npos;
+                
+                // Also check for error codes like "-222,Data out of range"
+                if (response.find("-") == 0 || (response.find(",") != std::string::npos && response[0] == '-'))
                 {
-                    std::string logMsg = cmd + " -> " + response;
-                    logCallback(logMsg);
+                    hasError = true;
+                }
+                
+                if (hasError && logCallback)
+                {
+                    // Log the error with the command that caused it
+                    logCallback("[DEVICE ERROR] " + cmd + " -> " + response);
+                    lastError = response;
+                }
+                else if (verboseLogging && logCallback)
+                {
+                    // In verbose mode, log all commands even if no error
+                    logCallback(cmd + " -> " + response);
                 }
             }
-            else if (status != VI_SUCCESS && logCallback)
+            else if (status == (ViStatus)0xBFFF0015)  // VI_ERROR_TMO - timeout
             {
-                // Don't log timeout errors (expected for some commands)
-                if (status != 0xBFFF0015)  // VI_ERROR_TMO
+                // Timeout on error query - device might be busy or command was slow
+                // Don't log this as an error, just continue
+                if (verboseLogging && logCallback)
                 {
-                    logCallback(cmd + " -> [Error query failed: " + std::to_string(status) + "]");
+                    logCallback(cmd + " -> [no response - device may be processing]");
                 }
+            }
+            else if (logCallback && verboseLogging)
+            {
+                logCallback(cmd + " -> [read failed: " + std::to_string(status) + "]");
             }
         }
     }
     catch (const std::exception& e)
     {
+        lastError = std::string("Exception: ") + e.what();
         if (logCallback)
-            logCallback(cmd + " -> [Exception: " + std::string(e.what()) + "]");
+            logCallback("[EXCEPTION] " + cmd + " -> " + e.what());
     }
     catch (...)
     {
+        lastError = "Unknown error";
         if (logCallback)
-            logCallback(cmd + " -> [Unknown error]");
+            logCallback("[ERROR] " + cmd + " -> Unknown exception");
+    }
+}
+
+// Fast write without error checking - for real-time slider updates
+// This is ~50-100ms faster than write() because it skips SYST:ERR? query
+void HP33120ADriver::writeFast(const std::string& cmd)
+{
+    std::lock_guard<std::recursive_mutex> lock(driverMutex);
+    if (!connected || !viPrintf) return;
+    
+    try
+    {
+        std::string cmdWithNewline = cmd + "\n";
+        ViSession sess = (ViSession)session;
+        ViStatus status = viPrintf(sess, "%s", cmdWithNewline.c_str());
+        
+        if (status != VI_SUCCESS)
+        {
+            lastError = "Write failed: " + cmd;
+            // Don't log errors for fast writes - they're fire-and-forget
+            return;
+        }
+        
+        if (viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
+        // NO error query - that's what makes this fast!
+    }
+    catch (...)
+    {
+        // Silently ignore exceptions in fast mode
     }
 }
 
@@ -236,42 +281,62 @@ std::string HP33120ADriver::query(const std::string& cmd)
     std::lock_guard<std::recursive_mutex> lock(driverMutex);
     if (!connected || !viPrintf || !viRead) return "";
     
-    // Send command (but don't log here - write() will log it)
-    std::string cmdWithNewline = cmd + "\n";
-    ViSession sess = (ViSession)session;
-    viPrintf(sess, "%s", cmdWithNewline.c_str());
-    
-    if (viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
-    // Minimal delay - device needs time to respond, but keep it very short
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    
-    char buffer[1024] = {0};
-    ViUInt32 retCount = 0;
-    
-    ViStatus status = viRead(sess, (ViBuf)buffer, sizeof(buffer) - 1, &retCount);
-    
-    if (status != VI_SUCCESS) 
+    try
     {
-        // Don't log read errors for unsupported query commands - they're expected
-        // Only log if it's a critical error (not timeout/unsupported command)
-        // Error -1073807339 (0xBFFF0015) is VI_ERROR_TMO which is common for unsupported queries
-        if (logCallback && status != 0xBFFF0015)  // Don't log timeout errors
+        std::string cmdWithNewline = cmd + "\n";
+        ViSession sess = (ViSession)session;
+        
+        ViStatus writeStatus = viPrintf(sess, "%s", cmdWithNewline.c_str());
+        if (writeStatus != VI_SUCCESS)
         {
-            logCallback(cmd + " -> [Read Error: " + std::to_string(status) + "]");
+            lastError = "Query write failed: " + cmd;
+            return "";
         }
+        
+        if (viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
+        
+        // No delay needed - the VISA read will use the configured timeout
+        
+        char buffer[1024] = {0};
+        ViUInt32 retCount = 0;
+        
+        ViStatus status = viRead(sess, (ViBuf)buffer, sizeof(buffer) - 1, &retCount);
+        
+        if (status != VI_SUCCESS) 
+        {
+            // VI_ERROR_TMO (0xBFFF0015) is timeout - common for unsupported queries
+            if (status != (ViStatus)0xBFFF0015)
+            {
+                lastError = "Query read failed: " + cmd + " (status: " + std::to_string(status) + ")";
+                if (logCallback)
+                    logCallback("[QUERY ERROR] " + cmd + " -> Read failed (" + std::to_string(status) + ")");
+            }
+            return "";
+        }
+        
+        if (retCount > 0) buffer[retCount] = '\0';
+        std::string result(buffer);
+        
+        // Remove trailing whitespace
+        while (!result.empty() && (result.back() == '\n' || result.back() == '\r' || result.back() == ' '))
+            result.pop_back();
+        
+        return result;
+    }
+    catch (const std::exception& e)
+    {
+        lastError = std::string("Query exception: ") + e.what();
+        if (logCallback)
+            logCallback("[EXCEPTION] Query " + cmd + " -> " + e.what());
         return "";
     }
-    
-    if (retCount > 0) buffer[retCount] = '\0';
-    std::string result(buffer);
-    
-    while (!result.empty() && (result.back() == '\n' || result.back() == '\r' || result.back() == ' '))
-        result.pop_back();
-    
-    // Don't log queries - they spam the status window
-    // Only log write() commands (normal SCPI commands like FREQ, VOLT, etc.)
-    
-    return result;
+    catch (...)
+    {
+        lastError = "Query unknown error";
+        if (logCallback)
+            logCallback("[ERROR] Query " + cmd + " -> Unknown exception");
+        return "";
+    }
 }
 
 std::string HP33120ADriver::queryIDN() { return query("*IDN?"); }
@@ -308,12 +373,19 @@ void HP33120ADriver::setUserWaveform(const std::string& name)
     write("FUNCtion:USER " + name);
 }
 
+void HP33120ADriver::selectUserWaveform(const std::string& name)
+{
+    // Just select which ARB is active without changing the main waveform shape
+    // This is useful when using ARBs for AM/FM modulation while keeping a different carrier
+    write("FUNCtion:USER " + name);
+}
+
 void HP33120ADriver::setFrequency(double freqHz)
 {
     baseFreq = freqHz;
     // Use juce::String for locale-safe formatting (guarantees dots, not commas)
     juce::String cmd = "FREQ " + juce::String(freqHz, 6);
-    write(cmd.toStdString());
+    writeFast(cmd.toStdString());  // Fast for instant slider response
 }
 
 void HP33120ADriver::setAmplitude(double ampVpp)
@@ -321,7 +393,7 @@ void HP33120ADriver::setAmplitude(double ampVpp)
     baseAmp = ampVpp;
     // Use juce::String for locale-safe formatting (guarantees dots, not commas)
     juce::String cmd = "VOLT " + juce::String(ampVpp, 6);
-    write(cmd.toStdString());
+    writeFast(cmd.toStdString());  // Fast for instant slider response
 }
 
 void HP33120ADriver::setOffset(double offsetV)
@@ -329,23 +401,21 @@ void HP33120ADriver::setOffset(double offsetV)
     baseOffset = offsetV;
     // Use juce::String for locale-safe formatting (guarantees dots, not commas)
     juce::String cmd = "VOLT:OFFS " + juce::String(offsetV, 6);
-    write(cmd.toStdString());
+    writeFast(cmd.toStdString());  // Fast for instant slider response
 }
 
 void HP33120ADriver::setPhase(double phaseDeg)
 {
     if (phaseDeg >= 360.0) phaseDeg = 359.999;
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(3) << "PHAS " << phaseDeg;
-    write(oss.str());
+    juce::String cmd = "PHAS " + juce::String(phaseDeg, 3);
+    writeFast(cmd.toStdString());  // Fast for instant slider response
 }
 
 void HP33120ADriver::setDutyCycle(double duty)
 {
     baseDuty = duty;
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(6) << "FUNC:SQU:DCYC " << duty;
-    write(oss.str());
+    juce::String cmd = "FUNC:SQU:DCYC " + juce::String(duty, 6);
+    writeFast(cmd.toStdString());  // Fast for instant slider response
 }
 
 void HP33120ADriver::setOutputEnabled(bool enabled)
@@ -353,37 +423,37 @@ void HP33120ADriver::setOutputEnabled(bool enabled)
     write(enabled ? "OUTP ON" : "OUTP OFF");
 }
 
-// AM
+// AM - use writeFast for slider-controlled values, write for toggles/combos
 void HP33120ADriver::setAMEnabled(bool enabled) { write(enabled ? "AM:STAT ON" : "AM:STAT OFF"); }
-void HP33120ADriver::setAMDepth(double depth) { write("AM:DEPT " + std::to_string(depth)); }
+void HP33120ADriver::setAMDepth(double depth) { writeFast("AM:DEPT " + std::to_string(depth)); }
 void HP33120ADriver::setAMSource(const std::string& source) { write("AM:SOUR " + source); }
 void HP33120ADriver::setAMInternalWaveform(const std::string& waveform) { write("AM:INT:FUNC " + waveform); }
-void HP33120ADriver::setAMInternalFrequency(double freqHz) { write("AM:INT:FREQ " + std::to_string(freqHz)); }
+void HP33120ADriver::setAMInternalFrequency(double freqHz) { writeFast("AM:INT:FREQ " + std::to_string(freqHz)); }
 
-// FM
+// FM - use writeFast for slider-controlled values, write for toggles/combos
 void HP33120ADriver::setFMEnabled(bool enabled) { write(enabled ? "FM:STAT ON" : "FM:STAT OFF"); }
-void HP33120ADriver::setFMDeviation(double devHz) { write("FM:DEV " + std::to_string(devHz)); }
+void HP33120ADriver::setFMDeviation(double devHz) { writeFast("FM:DEV " + std::to_string(devHz)); }
 void HP33120ADriver::setFMSource(const std::string& source) { write("FM:SOUR " + source); }
 void HP33120ADriver::setFMInternalWaveform(const std::string& waveform) { write("FM:INT:FUNC " + waveform); }
-void HP33120ADriver::setFMInternalFrequency(double freqHz) { write("FM:INT:FREQ " + std::to_string(freqHz)); }
+void HP33120ADriver::setFMInternalFrequency(double freqHz) { writeFast("FM:INT:FREQ " + std::to_string(freqHz)); }
 
-// FSK
+// FSK - use writeFast for slider-controlled values, write for toggles/combos
 void HP33120ADriver::setFSKEnabled(bool enabled) { write(enabled ? "FSK:STAT ON" : "FSK:STAT OFF"); }
-void HP33120ADriver::setFSKFrequency(double freqHz) { write("FSK:FREQ " + std::to_string(freqHz)); }
+void HP33120ADriver::setFSKFrequency(double freqHz) { writeFast("FSK:FREQ " + std::to_string(freqHz)); }
 void HP33120ADriver::setFSKSource(const std::string& source) { write("FSK:SOUR " + source); }
-void HP33120ADriver::setFSKInternalRate(double rateHz) { write("FSK:INT:RATE " + std::to_string(rateHz)); }
+void HP33120ADriver::setFSKInternalRate(double rateHz) { writeFast("FSK:INT:RATE " + std::to_string(rateHz)); }
 
-// Sweep
+// Sweep - use writeFast for slider-controlled values, write for toggles
 void HP33120ADriver::setSweepEnabled(bool enabled) { write(enabled ? "SWE:STAT ON" : "SWE:STAT OFF"); }
-void HP33120ADriver::setSweepStartFreq(double freqHz) { write("FREQ:STAR " + std::to_string(freqHz)); }
-void HP33120ADriver::setSweepStopFreq(double freqHz) { write("FREQ:STOP " + std::to_string(freqHz)); }
-void HP33120ADriver::setSweepTime(double timeS) { write("SWE:TIME " + std::to_string(timeS)); }
+void HP33120ADriver::setSweepStartFreq(double freqHz) { writeFast("FREQ:STAR " + std::to_string(freqHz)); }
+void HP33120ADriver::setSweepStopFreq(double freqHz) { writeFast("FREQ:STOP " + std::to_string(freqHz)); }
+void HP33120ADriver::setSweepTime(double timeS) { writeFast("SWE:TIME " + std::to_string(timeS)); }
 
-// Burst
+// Burst - use writeFast for slider-controlled values, write for toggles/combos
 void HP33120ADriver::setBurstEnabled(bool enabled) { write(enabled ? "BM:STAT ON" : "BM:STAT OFF"); }
-void HP33120ADriver::setBurstCycles(int cycles) { write("BM:NCYC " + std::to_string(cycles)); }
-void HP33120ADriver::setBurstPhase(double phaseDeg) { write("BM:PHAS " + std::to_string(phaseDeg)); }
-void HP33120ADriver::setBurstInternalPeriod(double periodS) { write("BM:INT:RATE " + std::to_string(1.0/periodS)); } // Note: 33120A uses Rate for Internal, not Period
+void HP33120ADriver::setBurstCycles(int cycles) { writeFast("BM:NCYC " + std::to_string(cycles)); }
+void HP33120ADriver::setBurstPhase(double phaseDeg) { writeFast("BM:PHAS " + std::to_string(phaseDeg)); }
+void HP33120ADriver::setBurstInternalPeriod(double periodS) { writeFast("BM:INT:RATE " + std::to_string(1.0/periodS)); }
 void HP33120ADriver::setBurstSource(const std::string& source) { write("BM:SOUR " + source); }
 
 // Sync/Trig
@@ -497,22 +567,40 @@ void HP33120ADriver::downloadARBWaveform(const std::string& name, const std::vec
     // Note: driverMutex is already locked at function start
     if (!connected || !viPrintf)
     {
+        lastError = "Device not connected";
         if (logCallback)
             logCallback("ARB upload failed: Device not connected");
         return;
     }
+    
+    // Clear last error before starting
+    lastError.clear();
     
     try
     {
         std::string cmdStr = cmd.toStdString();
         ViSession sess = (ViSession)session;
         
+        // Temporarily increase timeout for large ARB uploads
+        // Large waveform data (8000+ points, 100KB+ of command text) needs more time
+        if (viSetAttribute)
+        {
+            viSetAttribute((ViObject)sess, 0x3FFF001A, 10000); // 10 second timeout for ARB upload
+        }
+        
         // Step 1: Upload to VOLATILE memory
         // Use viPrintf like the Python code does - it handles large strings correctly
         ViStatus status = viPrintf(sess, "%s\n", cmdStr.c_str());
         
+        // Restore normal timeout immediately after write
+        if (viSetAttribute)
+        {
+            viSetAttribute((ViObject)sess, 0x3FFF001A, 500); // Restore 500ms timeout
+        }
+        
         if (status != VI_SUCCESS)
         {
+            lastError = "VISA write error " + std::to_string(status);
             if (logCallback)
                 logCallback("ARB upload failed: VISA write error " + std::to_string(status));
             return;
@@ -528,17 +616,17 @@ void HP33120ADriver::downloadARBWaveform(const std::string& name, const std::vec
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         std::string error = queryError();
         
-        if (logCallback)
+        if (error.find("No error") != std::string::npos || error.find("+0") != std::string::npos)
         {
-            if (error.find("No error") != std::string::npos || error.find("+0") != std::string::npos)
-            {
+            if (logCallback)
                 logCallback("DATA VOLATILE -> [Uploaded " + std::to_string(finalData.size()) + " points]");
-            }
-            else
-            {
+        }
+        else
+        {
+            lastError = "DATA VOLATILE: " + error;
+            if (logCallback)
                 logCallback("DATA VOLATILE -> " + error);
-                return;  // Don't proceed if upload failed
-            }
+            return;  // Don't proceed if upload failed
         }
         
         // Step 2: Copy from VOLATILE to non-volatile memory with the specified name
@@ -547,11 +635,85 @@ void HP33120ADriver::downloadARBWaveform(const std::string& name, const std::vec
         // Correct sequence: Try copy first, if it fails with +781, delete only the target name
         // (or one other waveform if target doesn't exist), then re-upload VOLATILE if needed.
         
-        // First, try to copy directly (this will succeed if target name exists and can be overwritten)
+        // First check available memory slots
+        std::string freeSlots = query("DATA:NVOLatile:FREE?");
+        if (logCallback)
+            logCallback("DATA:NVOLatile:FREE? -> " + freeSlots);
+        
+        // Check if target name already exists in catalog (will be overwritten if so)
+        std::string currentCatalog = query("DATA:NVOLatile:CATalog?");
+        if (logCallback)
+            logCallback("DATA:NVOLatile:CATalog? -> " + currentCatalog);
+        
+        std::string upperName = name;
+        std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
+        bool targetExists = (currentCatalog.find("\"" + upperName + "\"") != std::string::npos);
+        
+        // If memory is full (0 free slots) and target doesn't exist, we need to delete something first
+        if (freeSlots.find("0") != std::string::npos && !targetExists)
+        {
+            if (logCallback)
+                logCallback("Warning: No free memory slots and '" + name + "' doesn't exist. Need to delete an existing waveform first.");
+            
+            // Parse existing user waveforms from catalog
+            std::vector<std::string> userWaveforms;
+            std::string builtinNames[] = {"SINC", "NEG_RAMP", "EXP_RISE", "EXP_FALL", "CARDIAC"};
+            size_t pos = 0;
+            while ((pos = currentCatalog.find('"', pos)) != std::string::npos)
+            {
+                size_t endPos = currentCatalog.find('"', pos + 1);
+                if (endPos != std::string::npos)
+                {
+                    std::string wfName = currentCatalog.substr(pos + 1, endPos - pos - 1);
+                    bool isBuiltin = false;
+                    for (const auto& builtin : builtinNames)
+                    {
+                        if (wfName == builtin) { isBuiltin = true; break; }
+                    }
+                    if (!isBuiltin)
+                        userWaveforms.push_back(wfName);
+                    pos = endPos + 1;
+                }
+                else break;
+            }
+            
+            if (!userWaveforms.empty())
+            {
+                // Delete the first user waveform to make room
+                std::string wfToDelete = userWaveforms[0];
+                if (logCallback)
+                    logCallback("Deleting '" + wfToDelete + "' to free memory slot...");
+                
+                // Switch to built-in waveform first to avoid "can't delete active" error
+                write("FUNCtion:SHAPe SIN");
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                queryError();  // Clear
+                
+                write("DATA:DELete " + wfToDelete);
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::string delError = queryError();
+                if (logCallback)
+                    logCallback("DATA:DELete " + wfToDelete + " -> " + delError);
+            }
+        }
+        
+        // Now try to copy
         std::string copyCmd = "DATA:COPY " + name + ",VOLATILE";
         write(copyCmd);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));  // Give more time
         error = queryError();
+        
+        if (logCallback)
+            logCallback("DATA:COPY " + name + " error check: " + error);
+        
+        // Check if copy succeeded by verifying the waveform appears in catalog
+        // This is more reliable than just checking the error response
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::string verifyCatalog = query("DATA:NVOLatile:CATalog?");
+        bool copyVerified = (verifyCatalog.find("\"" + upperName + "\"") != std::string::npos);
+        
+        if (logCallback)
+            logCallback("DATA:NVOLatile:CATalog? (verify) -> " + verifyCatalog);
         
         // Check if copy succeeded
         bool hasErrorCode = (error.find("+781") != std::string::npos || 
@@ -562,10 +724,8 @@ void HP33120ADriver::downloadARBWaveform(const std::string& name, const std::vec
                             error.find("+783") != std::string::npos ||
                             error.find("+780") != std::string::npos);
         
-        bool copySucceeded = !hasErrorCode && 
-                            (error.find("No error") != std::string::npos || 
-                             error.find("+0") != std::string::npos ||
-                             error.find("\"+0") != std::string::npos);
+        // Use catalog verification as the primary success check
+        bool copySucceeded = copyVerified && !hasErrorCode;
         
         bool useVolatile = false;
         bool needReupload = false;
@@ -776,8 +936,19 @@ void HP33120ADriver::downloadARBWaveform(const std::string& name, const std::vec
         {
             copyCmd = "DATA:COPY " + name + ",VOLATILE";
             write(copyCmd);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
             error = queryError();
+            
+            if (logCallback)
+                logCallback("DATA:COPY " + name + " (retry) error check: " + error);
+            
+            // Verify via catalog
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            verifyCatalog = query("DATA:NVOLatile:CATalog?");
+            copyVerified = (verifyCatalog.find("\"" + upperName + "\"") != std::string::npos);
+            
+            if (logCallback)
+                logCallback("DATA:NVOLatile:CATalog? (retry verify) -> " + verifyCatalog);
             
             hasErrorCode = (error.find("+781") != std::string::npos || 
                             error.find("+785") != std::string::npos ||
@@ -787,10 +958,7 @@ void HP33120ADriver::downloadARBWaveform(const std::string& name, const std::vec
                             error.find("+783") != std::string::npos ||
                             error.find("+780") != std::string::npos);
             
-            copySucceeded = !hasErrorCode && 
-                            (error.find("No error") != std::string::npos || 
-                             error.find("+0") != std::string::npos ||
-                             error.find("\"+0") != std::string::npos);
+            copySucceeded = copyVerified && !hasErrorCode;
         }
         
         // Log final copy result
@@ -915,32 +1083,70 @@ std::vector<std::string> HP33120ADriver::queryWaveformCatalog()
     // Response format: "SINC","NEG_RAMP","EXP_RISE","EXP_FALL","CARDIAC","VOLATILE","ARB_1","ARB_2"
     std::string catalog = query("DATA:CATalog?");
     
+    // Also query DATA:NVOLatile:CATalog? for non-volatile user waveforms
+    std::string nvCatalog = query("DATA:NVOLatile:CATalog?");
+    
+    // Log raw responses for debugging
+    if (logCallback)
+    {
+        logCallback("DATA:CATalog? -> " + (catalog.empty() ? "(empty)" : catalog));
+        if (!nvCatalog.empty())
+            logCallback("DATA:NVOLatile:CATalog? -> " + nvCatalog);
+    }
+    
     if (catalog.empty()) return result;
     
     // Parse quoted strings from the response
     // Format: "NAME1","NAME2","NAME3"
-    size_t pos = 0;
-    while (pos < catalog.length())
-    {
-        // Find opening quote
-        size_t startQuote = catalog.find('"', pos);
-        if (startQuote == std::string::npos) break;
-        
-        // Find closing quote
-        size_t endQuote = catalog.find('"', startQuote + 1);
-        if (endQuote == std::string::npos) break;
-        
-        // Extract waveform name (without quotes)
-        std::string waveformName = catalog.substr(startQuote + 1, endQuote - startQuote - 1);
-        if (!waveformName.empty())
+    auto parseQuotedStrings = [](const std::string& str, std::vector<std::string>& out) {
+        size_t pos = 0;
+        while (pos < str.length())
         {
-            result.push_back(waveformName);
+            // Find opening quote
+            size_t startQuote = str.find('"', pos);
+            if (startQuote == std::string::npos) break;
+            
+            // Find closing quote
+            size_t endQuote = str.find('"', startQuote + 1);
+            if (endQuote == std::string::npos) break;
+            
+            // Extract waveform name (without quotes)
+            std::string waveformName = str.substr(startQuote + 1, endQuote - startQuote - 1);
+            if (!waveformName.empty())
+            {
+                out.push_back(waveformName);
+            }
+            
+            // Move past this quoted string and any comma/whitespace
+            pos = endQuote + 1;
+            while (pos < str.length() && (str[pos] == ',' || str[pos] == ' ' || str[pos] == '\n' || str[pos] == '\r'))
+                pos++;
         }
-        
-        // Move past this quoted string and any comma/whitespace
-        pos = endQuote + 1;
-        while (pos < catalog.length() && (catalog[pos] == ',' || catalog[pos] == ' ' || catalog[pos] == '\n' || catalog[pos] == '\r'))
-            pos++;
+    };
+    
+    parseQuotedStrings(catalog, result);
+    
+    // Also parse non-volatile catalog and add any waveforms not already in result
+    if (!nvCatalog.empty())
+    {
+        std::vector<std::string> nvResult;
+        parseQuotedStrings(nvCatalog, nvResult);
+        for (const auto& wf : nvResult)
+        {
+            bool found = false;
+            for (const auto& existing : result)
+            {
+                if (existing == wf)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+            {
+                result.push_back(wf);
+            }
+        }
     }
     
     return result;

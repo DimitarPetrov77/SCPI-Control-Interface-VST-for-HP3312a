@@ -329,8 +329,8 @@ void HP33120APluginAudioProcessor::DeviceCommandThread::run()
 {
     while (!threadShouldExit())
     {
-        // Wait for a command - process immediately when signaled
-        commandPending.wait();
+        // Wait for a command with timeout - allows periodic error checking
+        commandPending.wait(100);  // 100ms timeout for responsive error checking
         
         if (!device.isConnected()) continue;
         
@@ -339,8 +339,8 @@ void HP33120APluginAudioProcessor::DeviceCommandThread::run()
         {
             double freq = pendingFreq.load();
             hasPendingFreq = false;
-                device.setFrequency(freq);
-            }
+            device.setFrequency(freq);
+        }
         
         if (hasPendingAmp.load())
         {
@@ -368,6 +368,29 @@ void HP33120APluginAudioProcessor::DeviceCommandThread::run()
             double duty = pendingDuty.load();
             hasPendingDuty = false;
             device.setDutyCycle(duty);
+        }
+        
+        // Periodic error checking - catches errors from writeFast() calls
+        // This ensures users still see device errors without blocking slider movements
+        juce::int64 currentTime = juce::Time::currentTimeMillis();
+        if (currentTime - lastErrorCheck >= ERROR_CHECK_INTERVAL_MS)
+        {
+            lastErrorCheck = currentTime;
+            
+            // Query device error queue
+            std::string error = device.queryError();
+            
+            // Check if there's a real error (not "+0,No error")
+            if (!error.empty() && 
+                error.find("+0") == std::string::npos &&
+                error.find("No error") == std::string::npos)
+            {
+                // Log the error via the device's log callback
+                if (device.logCallback)
+                {
+                    device.logCallback("[DEVICE ERROR] " + error);
+                }
+            }
         }
     }
 }

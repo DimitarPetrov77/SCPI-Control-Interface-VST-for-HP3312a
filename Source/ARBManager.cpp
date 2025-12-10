@@ -97,14 +97,28 @@ public:
                     // Yield after upload
                     Thread::yield();
                     
+                    // Check if upload was successful by checking for errors
+                    std::string lastError = device.getLastError();
+                    bool uploadFailed = !lastError.empty() && 
+                                        lastError.find("timeout") == std::string::npos &&
+                                        lastError.find("No error") == std::string::npos;
+                    
                     {
                         juce::ScopedLock sl(slot.lock);
-                        slot.uploadedToDevice = true;
+                        if (!uploadFailed)
+                        {
+                            slot.uploadedToDevice = true;
+                            success = true;
+                            message = "Uploaded " + juce::String(resampled.size()) + " points";
+                        }
+                        else
+                        {
+                            slot.uploadedToDevice = false;
+                            success = false;
+                            message = "Upload failed: " + juce::String(lastError);
+                        }
                         slot.isUploading = false;
                     }
-                    
-                    success = true;
-                    message = "Uploaded " + juce::String(resampled.size()) + " points";
                 }
                 else
                 {
@@ -162,10 +176,10 @@ private:
 ARBManager::ARBManager(HP33120ADriver& driver)
     : device(driver), uploadThread(std::make_unique<UploadThread>(*this, driver))
 {
-    // Initialize default slot names
+    // Initialize default slot names (avoid built-in names: USER, VOLATILE, SINC, etc.)
     slots[0].name = "MYARB";
-    slots[1].name = "USER";
-    slots[2].name = "VOLATILE";
+    slots[1].name = "ARB_2";
+    slots[2].name = "ARB_3";
     slots[3].name = "CUSTOM";
 }
 
