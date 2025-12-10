@@ -1055,55 +1055,37 @@ void HP33120APluginAudioProcessorEditor::updateSingleParameter(juce::Slider* sli
         return;
     }
     
+    // Throttling is now handled in sliderValueChanged for drag updates
+    // This function is called from sliderValueChanged (already throttled) or sliderDragEnded
     juce::int64 currentTime = juce::Time::currentTimeMillis();
-    if (currentTime - lastUpdateTime < MIN_UPDATE_INTERVAL_MS) return;
-    
     lastUpdateTime = currentTime;
     isUpdatingParameters = true;
     HP33120ADriver& device = audioProcessor.getDevice();
     
-    // For user interactions, queue through background thread for consistency
+    // PERFORMANCE: User interactions send directly to device for immediate feedback
+    // Background thread is only for automation/LFO to prevent audio thread blocking
+    // User interactions happen on UI thread, so direct calls are safe and responsive
     try
     {
         if (slider == &frequencySlider) 
         {
-            auto* cmdThread = audioProcessor.getDeviceCommandThread();
-            if (cmdThread)
-                cmdThread->queueFrequencyUpdate(frequencySlider.getValue());
-            else
-                device.setFrequency(frequencySlider.getValue());
+            device.setFrequency(frequencySlider.getValue());
         }
         else if (slider == &amplitudeSlider) 
         {
-            auto* cmdThread = audioProcessor.getDeviceCommandThread();
-            if (cmdThread)
-                cmdThread->queueAmplitudeUpdate(amplitudeSlider.getValue());
-            else
-                device.setAmplitude(amplitudeSlider.getValue());
+            device.setAmplitude(amplitudeSlider.getValue());
         }
         else if (slider == &offsetSlider) 
         {
-            auto* cmdThread = audioProcessor.getDeviceCommandThread();
-            if (cmdThread)
-                cmdThread->queueOffsetUpdate(offsetSlider.getValue());
-            else
-                device.setOffset(offsetSlider.getValue());
+            device.setOffset(offsetSlider.getValue());
         }
         else if (slider == &phaseSlider) 
         {
-            auto* cmdThread = audioProcessor.getDeviceCommandThread();
-            if (cmdThread)
-                cmdThread->queuePhaseUpdate(phaseSlider.getValue());
-            else
-                device.setPhase(phaseSlider.getValue());
+            device.setPhase(phaseSlider.getValue());
         }
         else if (slider == &dutyCycleSlider) 
         {
-            auto* cmdThread = audioProcessor.getDeviceCommandThread();
-            if (cmdThread)
-                cmdThread->queueDutyCycleUpdate(dutyCycleSlider.getValue());
-            else
-                device.setDutyCycle(dutyCycleSlider.getValue());
+            device.setDutyCycle(dutyCycleSlider.getValue());
         }
         else if (slider == &amDepthSlider) device.setAMDepth(amDepthSlider.getValue());
         else if (slider == &amIntFreqSlider) device.setAMInternalFrequency(amIntFreqSlider.getValue());
@@ -1138,7 +1120,18 @@ void HP33120APluginAudioProcessorEditor::sliderValueChanged(juce::Slider* slider
         return;
     }
     
-    if (slider->isMouseButtonDown()) return; // Wait for drag end
+    // PERFORMANCE: Update during drag for smooth feedback, but throttle to avoid overwhelming device
+    // Throttle to ~20 Hz (50ms) during dragging for smooth but not excessive updates
+    juce::int64 currentTime = juce::Time::currentTimeMillis();
+    static constexpr int DRAG_UPDATE_INTERVAL_MS = 50; // 20 Hz during drag
+    
+    if (slider->isMouseButtonDown())
+    {
+        // During drag: throttle updates but still send them for smooth feedback
+        if (currentTime - lastUpdateTime < DRAG_UPDATE_INTERVAL_MS)
+            return; // Skip this update, too soon since last one
+    }
+    // If not dragging (keyboard input), update immediately
     
     // Check for snapped values to avoid recursive updates
     if (slider == &frequencySlider || slider == &sweepStartSlider || 

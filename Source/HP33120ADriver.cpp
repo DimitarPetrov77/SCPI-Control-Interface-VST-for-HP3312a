@@ -173,15 +173,15 @@ void HP33120ADriver::write(const std::string& cmd)
         
         if (viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
         
-        // No delays - send commands as fast as possible, let the device handle the rate
-        // Query device error response and log it (raw hardware response)
-        // This shows the actual response from the hardware after each command
-        // Minimal delay only for device to be ready to respond
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        
-        // Directly query SYST:ERR? without going through query() to avoid recursion
-        if (viPrintf && viRead)
+        // PERFORMANCE: Only query error response if verbose logging is enabled
+        // This eliminates 2ms delay per command for normal operation
+        // Error checking is still available when needed via verbose logging
+        if (verboseLogging && viPrintf && viRead)
         {
+            // Minimal delay only for device to be ready to respond
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            
+            // Directly query SYST:ERR? without going through query() to avoid recursion
             status = viPrintf(sess, "SYST:ERR?\n");
             if (status == VI_SUCCESS && viFlush) viFlush(sess, VI_FLUSH_ON_WRITE);
             

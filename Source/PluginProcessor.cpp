@@ -277,8 +277,8 @@ void HP33120APluginAudioProcessor::DeviceCommandThread::run()
         {
             double freq = pendingFreq.load();
             hasPendingFreq = false;
-            device.setFrequency(freq);
-        }
+                device.setFrequency(freq);
+            }
         
         if (hasPendingAmp.load())
         {

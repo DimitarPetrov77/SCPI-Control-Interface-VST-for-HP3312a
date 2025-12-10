@@ -174,7 +174,7 @@ private:
     
     bool isUpdatingParameters = false;  // Prevent recursive updates
     juce::int64 lastUpdateTime = 0;  // Throttle updates
-    static constexpr int MIN_UPDATE_INTERVAL_MS = 0;  // No throttling - immediate updates
+    static constexpr int MIN_UPDATE_INTERVAL_MS = 0;  // No throttling for user interactions - immediate updates
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HP33120APluginAudioProcessorEditor)
 };
