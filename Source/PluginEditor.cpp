@@ -5,17 +5,52 @@
 #include <algorithm>
 
 // Helper function to format frequency with appropriate unit (Hz, kHz, MHz)
+// Uses smart precision: more decimals for small values, fewer for large values
 static juce::String formatFrequency(double freqHz)
 {
     if (freqHz >= 1e6)
-        return juce::String(freqHz / 1e6, 3) + " MHz";
+    {
+        // MHz range: show up to 6 decimals for precision, trim trailing zeros
+        double mhz = freqHz / 1e6;
+        if (mhz >= 10.0)
+            return juce::String(mhz, 4) + " MHz";
+        else
+            return juce::String(mhz, 6) + " MHz";
+    }
     else if (freqHz >= 1e3)
-        return juce::String(freqHz / 1e3, 3) + " kHz";
+    {
+        // kHz range: precision based on value
+        double khz = freqHz / 1e3;
+        if (khz >= 100.0)
+            return juce::String(khz, 3) + " kHz";
+        else if (khz >= 10.0)
+            return juce::String(khz, 4) + " kHz";
+        else
+            return juce::String(khz, 5) + " kHz";
+    }
+    else if (freqHz >= 1.0)
+    {
+        // Hz range
+        if (freqHz >= 100.0)
+            return juce::String(freqHz, 2) + " Hz";
+        else if (freqHz >= 10.0)
+            return juce::String(freqHz, 3) + " Hz";
+        else
+            return juce::String(freqHz, 4) + " Hz";
+    }
+    else if (freqHz >= 0.001)
+    {
+        // mHz range
+        return juce::String(freqHz * 1000.0, 3) + " mHz";
+    }
     else
-        return juce::String(freqHz, 3) + " Hz";
+    {
+        // µHz range (sub-millihertz)
+        return juce::String(freqHz * 1e6, 2) + " uHz";
+    }
 }
 
-// Helper function to parse frequency string with units (e.g., "15kHz", "10Hz", "20MHz")
+// Helper function to parse frequency string with units (e.g., "15kHz", "10Hz", "20MHz", "100mHz")
 static double parseFrequency(const juce::String& text)
 {
     juce::String trimmed = text.trim().toUpperCase();
@@ -28,9 +63,11 @@ static double parseFrequency(const juce::String& text)
     double multiplier = 1.0;
     juce::String numStr = trimmed;
     
-    // Check for unit suffixes
+    // Check for unit suffixes (order matters - check longer suffixes first)
     if (trimmed.endsWith("MHZ")) { multiplier = 1e6; numStr = trimmed.substring(0, trimmed.length() - 3); }
     else if (trimmed.endsWith("KHZ")) { multiplier = 1e3; numStr = trimmed.substring(0, trimmed.length() - 3); }
+    else if (trimmed.endsWith("UHZ")) { multiplier = 1e-6; numStr = trimmed.substring(0, trimmed.length() - 3); }  // µHz
+    else if (trimmed.endsWith("MHZ")) { multiplier = 1e-3; numStr = trimmed.substring(0, trimmed.length() - 3); }  // mHz
     else if (trimmed.endsWith("HZ")) { multiplier = 1.0; numStr = trimmed.substring(0, trimmed.length() - 2); }
     else if (trimmed.endsWith("M") && trimmed.length() > 1)
     {
@@ -48,10 +85,8 @@ static double parseFrequency(const juce::String& text)
     
     double result = value * multiplier;
     
-    if (result < 1.0) result = std::round(result * 100.0) / 100.0;
-    else if (result < 1e3) result = std::round(result * 10.0) / 10.0;
-    else if (result < 1e6) result = std::round(result);
-    else result = std::round(result / 10.0) * 10.0;
+    // Clamp to HP33120A range: 100 µHz to 15 MHz
+    result = std::max(0.0001, std::min(15e6, result));
     
     return result;
 }
@@ -79,9 +114,12 @@ static double snapFrequency(double freqHz)
 HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120APluginAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    setResizable(true, true);
-    setResizeLimits(1000, 600, 2000, 1200);
-    setSize (1200, 800);  // Wider but shorter
+    // Apply vim console aesthetic
+    setLookAndFeel(&vimLookAndFeel);
+    
+    // Fixed size plugin - wider to fit labels properly
+    setResizable(false, false);
+    setSize(1300, 900);  // Wider window for proper label display
     startTimer(100);  // Update UI every 100ms
     
     // Connection UI
@@ -128,9 +166,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     frequencyLabel.setText("Frequency:", juce::dontSendNotification);
     addAndMakeVisible(&frequencyLabel);
     frequencySlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    frequencySlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
-    juce::NormalisableRange<double> freqRange(1.0, 15e6);
-    freqRange.setSkewForCentre(1000.0);
+    frequencySlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
+    // HP33120A: 100 µHz to 15 MHz - use logarithmic-like skew for better control
+    juce::NormalisableRange<double> freqRange(0.0001, 15e6);
+    freqRange.setSkewForCentre(1000.0);  // Center around 1 kHz for good audio frequency control
     frequencySlider.setNormalisableRange(freqRange);
     frequencySlider.setValue(1000.0);
     frequencySlider.textFromValueFunction = [](double value) { return formatFrequency(value); };
@@ -139,10 +178,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     frequencySlider.addListener(this);
     addAndMakeVisible(&frequencySlider);
     
-    amplitudeLabel.setText("Amplitude (Vpp):", juce::dontSendNotification);
+    amplitudeLabel.setText("Amplitude", juce::dontSendNotification);
     addAndMakeVisible(&amplitudeLabel);
     amplitudeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    amplitudeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    amplitudeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     amplitudeSlider.setRange(0.01, 10.0, 0.01);
     amplitudeSlider.setValue(1.0);
     amplitudeSlider.setTextValueSuffix(" Vpp");
@@ -151,10 +190,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     amplitudeSlider.addListener(this);
     addAndMakeVisible(&amplitudeSlider);
     
-    offsetLabel.setText("Offset (V):", juce::dontSendNotification);
+    offsetLabel.setText("Offset", juce::dontSendNotification);
     addAndMakeVisible(&offsetLabel);
     offsetSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    offsetSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    offsetSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     offsetSlider.setRange(-5.0, 5.0, 0.01);
     offsetSlider.setValue(0.0);
     offsetSlider.setTextValueSuffix(" V");
@@ -163,10 +202,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     offsetSlider.addListener(this);
     addAndMakeVisible(&offsetSlider);
     
-    phaseLabel.setText("Phase (deg):", juce::dontSendNotification);
+    phaseLabel.setText("Phase", juce::dontSendNotification);
     addAndMakeVisible(&phaseLabel);
     phaseSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    phaseSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    phaseSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     phaseSlider.setRange(0.0, 359.999, 0.001);
     phaseSlider.setValue(0.0);
     phaseSlider.setTextValueSuffix(" deg");
@@ -175,10 +214,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     phaseSlider.addListener(this);
     addAndMakeVisible(&phaseSlider);
     
-    dutyCycleLabel.setText("Duty (%):", juce::dontSendNotification);
+    dutyCycleLabel.setText("Duty Cycle", juce::dontSendNotification);
     addAndMakeVisible(&dutyCycleLabel);
     dutyCycleSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    dutyCycleSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    dutyCycleSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     dutyCycleSlider.setRange(0.1, 99.9, 0.1);
     dutyCycleSlider.setValue(50.0);
     dutyCycleSlider.setTextValueSuffix(" %");
@@ -187,7 +226,7 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     dutyCycleSlider.addListener(this);
     addAndMakeVisible(&dutyCycleSlider);
     
-    outputToggle.setButtonText("Output ON");
+    outputToggle.setButtonText("Output: OFF");
     outputToggle.addListener(this);
     addAndMakeVisible(&outputToggle);
     
@@ -195,14 +234,14 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     amfmGroup.setText("AM / FM Settings");
     addAndMakeVisible(&amfmGroup);
     
-    amEnabledToggle.setButtonText("AM On");
+    amEnabledToggle.setButtonText("AM Enable: OFF");
     amEnabledToggle.addListener(this);
     addAndMakeVisible(&amEnabledToggle);
     
-    amDepthLabel.setText("AM Depth (%):", juce::dontSendNotification);
+    amDepthLabel.setText("Depth", juce::dontSendNotification);
     addAndMakeVisible(&amDepthLabel);
     amDepthSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    amDepthSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    amDepthSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     amDepthSlider.setRange(0.0, 120.0, 0.1);
     amDepthSlider.setValue(50.0);
     amDepthSlider.setTextValueSuffix(" %");
@@ -231,10 +270,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     amIntWaveformCombo.addListener(this);
     addAndMakeVisible(&amIntWaveformCombo);
     
-    amIntFreqLabel.setText("AM Int Freq:", juce::dontSendNotification);
+    amIntFreqLabel.setText("Int Freq", juce::dontSendNotification);
     addAndMakeVisible(&amIntFreqLabel);
     amIntFreqSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    amIntFreqSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    amIntFreqSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     juce::NormalisableRange<double> amFreqRange(0.01, 20000.0);
     amFreqRange.setSkewForCentre(100.0);
     amIntFreqSlider.setNormalisableRange(amFreqRange);
@@ -245,14 +284,14 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     amIntFreqSlider.addListener(this);
     addAndMakeVisible(&amIntFreqSlider);
     
-    fmEnabledToggle.setButtonText("FM On");
+    fmEnabledToggle.setButtonText("FM Enable: OFF");
     fmEnabledToggle.addListener(this);
     addAndMakeVisible(&fmEnabledToggle);
     
-    fmDevLabel.setText("FM Dev:", juce::dontSendNotification);
+    fmDevLabel.setText("Deviation", juce::dontSendNotification);
     addAndMakeVisible(&fmDevLabel);
     fmDevSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    fmDevSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    fmDevSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     juce::NormalisableRange<double> fmDevRange(0.01, 7.5e6);
     fmDevRange.setSkewForCentre(1000.0);
     fmDevSlider.setNormalisableRange(fmDevRange);
@@ -283,10 +322,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     fmIntWaveformCombo.addListener(this);
     addAndMakeVisible(&fmIntWaveformCombo);
     
-    fmIntFreqLabel.setText("FM Int Freq:", juce::dontSendNotification);
+    fmIntFreqLabel.setText("Int Freq", juce::dontSendNotification);
     addAndMakeVisible(&fmIntFreqLabel);
     fmIntFreqSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    fmIntFreqSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    fmIntFreqSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     juce::NormalisableRange<double> fmIntFreqRange(0.01, 10000.0);
     fmIntFreqRange.setSkewForCentre(100.0);
     fmIntFreqSlider.setNormalisableRange(fmIntFreqRange);
@@ -301,14 +340,14 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     fskGroup.setText("FSK Settings");
     addAndMakeVisible(&fskGroup);
     
-    fskEnabledToggle.setButtonText("FSK On");
+    fskEnabledToggle.setButtonText("FSK Enable: OFF");
     fskEnabledToggle.addListener(this);
     addAndMakeVisible(&fskEnabledToggle);
     
     fskFreqLabel.setText("Hop Freq:", juce::dontSendNotification);
     addAndMakeVisible(&fskFreqLabel);
     fskFreqSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    fskFreqSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    fskFreqSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     juce::NormalisableRange<double> fskFreqRange(0.01, 15e6);
     fskFreqRange.setSkewForCentre(1000.0);
     fskFreqSlider.setNormalisableRange(fskFreqRange);
@@ -330,7 +369,7 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     fskRateLabel.setText("Int Rate:", juce::dontSendNotification);
     addAndMakeVisible(&fskRateLabel);
     fskRateSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    fskRateSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    fskRateSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     juce::NormalisableRange<double> fskRateRange(0.01, 50000.0);
     fskRateRange.setSkewForCentre(100.0);
     fskRateSlider.setNormalisableRange(fskRateRange);
@@ -345,14 +384,14 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     advGroup.setText("Advanced (Sweep/Burst/Sync/ARB)");
     addAndMakeVisible(&advGroup);
     
-    sweepEnabledToggle.setButtonText("Sweep On");
+    sweepEnabledToggle.setButtonText("Sweep Enable: OFF");
     sweepEnabledToggle.addListener(this);
     addAndMakeVisible(&sweepEnabledToggle);
     
-    sweepStartLabel.setText("Sweep Start Freq:", juce::dontSendNotification);
+    sweepStartLabel.setText("Start Freq", juce::dontSendNotification);
     addAndMakeVisible(&sweepStartLabel);
     sweepStartSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    sweepStartSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    sweepStartSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     juce::NormalisableRange<double> sweepStartRange(1.0, 15e6);
     sweepStartRange.setSkewForCentre(1000.0);
     sweepStartSlider.setNormalisableRange(sweepStartRange);
@@ -363,10 +402,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     sweepStartSlider.addListener(this);
     addAndMakeVisible(&sweepStartSlider);
     
-    sweepStopLabel.setText("Sweep Stop Freq:", juce::dontSendNotification);
+    sweepStopLabel.setText("Stop Freq", juce::dontSendNotification);
     addAndMakeVisible(&sweepStopLabel);
     sweepStopSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    sweepStopSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    sweepStopSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     juce::NormalisableRange<double> sweepStopRange(1.0, 15e6);
     sweepStopRange.setSkewForCentre(10000.0);
     sweepStopSlider.setNormalisableRange(sweepStopRange);
@@ -377,10 +416,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     sweepStopSlider.addListener(this);
     addAndMakeVisible(&sweepStopSlider);
     
-    sweepTimeLabel.setText("Sweep Time (s):", juce::dontSendNotification);
+    sweepTimeLabel.setText("Time", juce::dontSendNotification);
     addAndMakeVisible(&sweepTimeLabel);
     sweepTimeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    sweepTimeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    sweepTimeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     sweepTimeSlider.setRange(0.001, 3600.0, 0.001);
     sweepTimeSlider.setValue(1.0);
     sweepTimeSlider.setTextValueSuffix(" s");
@@ -389,14 +428,14 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     sweepTimeSlider.addListener(this);
     addAndMakeVisible(&sweepTimeSlider);
     
-    burstEnabledToggle.setButtonText("Burst On");
+    burstEnabledToggle.setButtonText("Burst Enable: OFF");
     burstEnabledToggle.addListener(this);
     addAndMakeVisible(&burstEnabledToggle);
     
     burstCyclesLabel.setText("Cycles:", juce::dontSendNotification);
     addAndMakeVisible(&burstCyclesLabel);
     burstCyclesSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    burstCyclesSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    burstCyclesSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     burstCyclesSlider.setRange(1.0, 50000.0, 1.0);
     burstCyclesSlider.setValue(1.0);
     burstCyclesSlider.setTextValueSuffix("");
@@ -405,10 +444,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     burstCyclesSlider.addListener(this);
     addAndMakeVisible(&burstCyclesSlider);
     
-    burstPhaseLabel.setText("Burst Phase (deg):", juce::dontSendNotification);
+    burstPhaseLabel.setText("Phase", juce::dontSendNotification);
     addAndMakeVisible(&burstPhaseLabel);
     burstPhaseSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    burstPhaseSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    burstPhaseSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     burstPhaseSlider.setRange(-360.0, 360.0, 1.0);
     burstPhaseSlider.setValue(0.0);
     burstPhaseSlider.setTextValueSuffix(" deg");
@@ -417,10 +456,10 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     burstPhaseSlider.addListener(this);
     addAndMakeVisible(&burstPhaseSlider);
     
-    burstIntPeriodLabel.setText("Int Period (s):", juce::dontSendNotification);
+    burstIntPeriodLabel.setText("Int Period", juce::dontSendNotification);
     addAndMakeVisible(&burstIntPeriodLabel);
     burstIntPeriodSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    burstIntPeriodSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    burstIntPeriodSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     burstIntPeriodSlider.setRange(1e-6, 3600.0, 1e-6);
     burstIntPeriodSlider.setValue(0.1);
     burstIntPeriodSlider.setTextValueSuffix(" s");
@@ -429,7 +468,7 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     burstIntPeriodSlider.addListener(this);
     addAndMakeVisible(&burstIntPeriodSlider);
     
-    burstSourceLabel.setText("Burst Source:", juce::dontSendNotification);
+    burstSourceLabel.setText("Source", juce::dontSendNotification);
     addAndMakeVisible(&burstSourceLabel);
     burstSourceCombo.addItem("INT", 1);
     burstSourceCombo.addItem("EXT", 2);
@@ -437,14 +476,14 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     burstSourceCombo.addListener(this);
     addAndMakeVisible(&burstSourceCombo);
     
-    syncEnabledToggle.setButtonText("Sync On");
+    syncEnabledToggle.setButtonText("Sync Enable: OFF");
     syncEnabledToggle.addListener(this);
     addAndMakeVisible(&syncEnabledToggle);
     
-    syncPhaseLabel.setText("Sync Phase (deg):", juce::dontSendNotification);
+    syncPhaseLabel.setText("Sync Phase", juce::dontSendNotification);
     addAndMakeVisible(&syncPhaseLabel);
     syncPhaseSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    syncPhaseSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 150, 25);
+    syncPhaseSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
     syncPhaseSlider.setRange(0.0, 359.999, 0.001);
     syncPhaseSlider.setValue(0.0);
     syncPhaseSlider.setTextValueSuffix(" deg");
@@ -478,7 +517,7 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
         addAndMakeVisible(&arbSlotUIs[i].pointsLabel);
         
         arbSlotUIs[i].pointsSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-        arbSlotUIs[i].pointsSlider.setTextBoxStyle(juce::Slider::TextBoxRight, true, 100, 25);
+        arbSlotUIs[i].pointsSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 50, 16);
         arbSlotUIs[i].pointsSlider.setRange(8.0, 16000.0, 1.0);
         arbSlotUIs[i].pointsSlider.setValue(1024.0);
         arbSlotUIs[i].pointsSlider.setTextValueSuffix(" pts");
@@ -540,7 +579,7 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
         });
     };
     
-    // Create parameter attachments
+    // Create parameter attachments - these expose parameters to DAW for automation
     sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.parameters, Parameters::FREQUENCY, frequencySlider));
     // Set text conversion functions AFTER attachment
@@ -560,6 +599,72 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
     buttonAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.parameters, Parameters::OUTPUT_ENABLED, outputToggle));
     
+    // AM Parameter attachments - visible in DAW automation
+    buttonAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.parameters, Parameters::AM_ENABLED, amEnabledToggle));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::AM_DEPTH, amDepthSlider));
+    comboAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.parameters, Parameters::AM_SOURCE, amSourceCombo));
+    comboAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.parameters, Parameters::AM_INT_WAVEFORM, amIntWaveformCombo));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::AM_INT_FREQ, amIntFreqSlider));
+    
+    // FM Parameter attachments - visible in DAW automation
+    buttonAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.parameters, Parameters::FM_ENABLED, fmEnabledToggle));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::FM_DEVIATION, fmDevSlider));
+    comboAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.parameters, Parameters::FM_SOURCE, fmSourceCombo));
+    comboAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.parameters, Parameters::FM_INT_WAVEFORM, fmIntWaveformCombo));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::FM_INT_FREQ, fmIntFreqSlider));
+    
+    // FSK Parameter attachments - visible in DAW automation
+    buttonAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.parameters, Parameters::FSK_ENABLED, fskEnabledToggle));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::FSK_FREQUENCY, fskFreqSlider));
+    comboAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.parameters, Parameters::FSK_SOURCE, fskSourceCombo));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::FSK_RATE, fskRateSlider));
+    
+    // Sweep Parameter attachments - visible in DAW automation
+    buttonAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.parameters, Parameters::SWEEP_ENABLED, sweepEnabledToggle));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::SWEEP_START, sweepStartSlider));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::SWEEP_STOP, sweepStopSlider));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::SWEEP_TIME, sweepTimeSlider));
+    
+    // Burst Parameter attachments - visible in DAW automation
+    buttonAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.parameters, Parameters::BURST_ENABLED, burstEnabledToggle));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::BURST_CYCLES, burstCyclesSlider));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::BURST_PHASE, burstPhaseSlider));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::BURST_INT_PERIOD, burstIntPeriodSlider));
+    comboAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.parameters, Parameters::BURST_SOURCE, burstSourceCombo));
+    
+    // Sync Parameter attachments - visible in DAW automation
+    buttonAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.parameters, Parameters::SYNC_ENABLED, syncEnabledToggle));
+    sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.parameters, Parameters::SYNC_PHASE, syncPhaseSlider));
+    
+    // Trigger Parameter attachments - visible in DAW automation
+    comboAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.parameters, Parameters::TRIGGER_SOURCE, triggerSourceCombo));
+    
     // ARB Slot parameter attachments
     sliderAttachments.push_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.parameters, Parameters::ARB_SLOT1_POINTS, arbSlotUIs[0].pointsSlider));
@@ -573,195 +678,397 @@ HP33120APluginAudioProcessorEditor::HP33120APluginAudioProcessorEditor (HP33120A
 
 HP33120APluginAudioProcessorEditor::~HP33120APluginAudioProcessorEditor()
 {
+    setLookAndFeel(nullptr);  // Clean up look and feel
 }
 
 //==============================================================================
 void HP33120APluginAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
+    // Fill background with pure black
+    g.fillAll(juce::Colour(0xFF000000));
+    
+    // Layout Constants (Must match resized())
+    const int headerHeight = 32;
+    const int statusBarHeight = 20;
+    const int messagesHeight = 120;
+    const int padding = 8;
+    
+    const int ctrlHeight = 40;
+    const int spacing = 6;
+    // const int toggleHeight = 22; // Unused in paint layout calculation currently, simplified
+    // const int sectionHeaderPadding = 10; 
+    // const int sectionGap = 12;
+    
+    // We will re-calculate section heights manually here to match resized() perfectly
+    // or use the same variables.
+    // For simplicity in this non-shared environment, we will define the heights directly.
+    
+    // ============================================
+    // Draw header bar background
+    // ============================================
+    auto headerArea = juce::Rectangle<int>(0, 0, getWidth(), headerHeight);
+    g.setColour(juce::Colour(0xFF0A1F0A));
+    g.fillRect(headerArea);
+    
+    // Header border
+    g.setColour(juce::Colour(0xFF4ADE80));
+    g.drawLine(0.0f, (float)headerHeight, (float)getWidth(), (float)headerHeight, 2.0f);
+    
+    // Draw HP33120A title in header
+    g.setColour(juce::Colour(0xFFFACC15));
+    g.setFont(juce::Font(16.0f).boldened());
+    g.drawText(">_ HP33120A Function Generator", 
+               headerArea.reduced(padding, 0), 
+               juce::Justification::centredLeft);
+    
+    // ============================================
+    // Draw status bar at bottom
+    // ============================================
+    auto statusBarArea = juce::Rectangle<int>(0, getHeight() - statusBarHeight, getWidth(), statusBarHeight);
+    g.setColour(juce::Colour(0xFF0A1F0A));
+    g.fillRect(statusBarArea);
+    
+    g.setColour(juce::Colour(0xFF4ADE80));
+    g.drawLine(0.0f, (float)(getHeight() - statusBarHeight), (float)getWidth(), (float)(getHeight() - statusBarHeight), 1.0f);
+    
+    // Status text
+    g.setColour(juce::Colour(0xFF6B7280));
+    g.setFont(juce::Font(11.0f));
+    g.drawText("hp33120a.conf | NORMAL MODE", 
+               statusBarArea.reduced(110, 0),
+               juce::Justification::centredLeft);
+    
+    juce::String statusRight = juce::String(statusMessages.size()) + " messages";
+    g.drawText(statusRight, 
+               statusBarArea.reduced(padding, 0),
+               juce::Justification::centredRight);
+    
+    // ============================================
+    // Draw messages area separator
+    // ============================================
+    int messagesTop = getHeight() - statusBarHeight - messagesHeight;
+    g.setColour(juce::Colour(0xFF4ADE80));
+    g.drawLine(0.0f, (float)messagesTop, (float)getWidth(), (float)messagesTop, 2.0f);
+    
+    // ============================================
+    // Helper lambda to draw section box
+    // ============================================
+    auto drawSectionBox = [&](juce::Rectangle<int> bounds, const juce::String& title) {
+        g.setColour(juce::Colour(0xFFFACC15));
+        g.drawRect(bounds, 1);
+        
+        g.setFont(juce::Font(10.0f).boldened());
+        int textWidth = g.getCurrentFont().getStringWidth("■ " + title) + 6;
+        auto titleBounds = juce::Rectangle<int>(bounds.getX() + 6, bounds.getY() - 5, textWidth, 10);
+        g.setColour(juce::Colour(0xFF000000));
+        g.fillRect(titleBounds);
+        g.setColour(juce::Colour(0xFFFACC15));
+        g.drawText("■ " + title, titleBounds, juce::Justification::centredLeft);
+    };
+    
+    // ============================================
+    // Calculate section bounds (Using Stack Logic matching resized)
+    // ============================================
+    // Constants from resized()
+    const int toggleHeight = 22;
+    const int sectionHeaderPadding = 10;
+    const int sectionGap = 12;
+    
+    // Main content area
+    auto mainArea = juce::Rectangle<int>(0, headerHeight, getWidth(), messagesTop - headerHeight);
+    
+    // Margins (must match resized)
+    mainArea.removeFromTop(8); 
+    mainArea.removeFromBottom(4);
+    
+    int columnWidth = getWidth() / 3;
+    
+    // --- Left Column ---
+    // We create a fresh copy of rect for each column to match removeFromLeft logic if we were using a single main rect
+    // But resized() constructs per-column rects. Let's do the same.
+    // Actually, resized() splits a main rect.
+    auto mainColumns = mainArea;
+    
+    // Left
+    auto leftCol = mainColumns.removeFromLeft(columnWidth).reduced(padding, 0);
+    
+    // SIGNAL GENERATOR: 1 Combo + 5 Sliders
+    int sigGenH = sectionHeaderPadding * 2 + (ctrlHeight + spacing) * 6;
+    drawSectionBox(leftCol.removeFromTop(sigGenH), "SIGNAL GENERATOR");
+    
+    leftCol.removeFromTop(sectionGap);
+    
+    // SYNC OUTPUT: 1 Toggle + 1 Slider
+    int syncH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing);
+    drawSectionBox(leftCol.removeFromTop(syncH), "SYNC OUTPUT");
+    
+    leftCol.removeFromTop(sectionGap);
+    
+    // ARB WAVEFORMS: 4 Slots
+    int arbSlotH = 85; 
+    int arbH = sectionHeaderPadding * 2 + (arbSlotH + 8) * 4; 
+    drawSectionBox(leftCol.removeFromTop(arbH), "ARBITRARY WAVEFORMS");
+    
+    // --- Middle Column ---
+    auto midCol = mainColumns.removeFromLeft(columnWidth).reduced(padding, 0);
+    
+    // AM MODULATION
+    int amH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing) * 4;
+    drawSectionBox(midCol.removeFromTop(amH), "AM MODULATION");
+    
+    midCol.removeFromTop(sectionGap);
+    
+    // FM MODULATION
+    int fmH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing) * 4;
+    drawSectionBox(midCol.removeFromTop(fmH), "FM MODULATION");
+    
+    midCol.removeFromTop(sectionGap);
+    
+    // FSK MODULATION
+    int fskH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing) * 1;
+    drawSectionBox(midCol.removeFromTop(fskH), "FSK MODULATION");
+    
+    // --- Right Column ---
+    auto rightCol = mainColumns.removeFromLeft(columnWidth).reduced(padding, 0);
+    
+    // SWEEP
+    int sweepH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing) * 3;
+    drawSectionBox(rightCol.removeFromTop(sweepH), "SWEEP");
+    
+    rightCol.removeFromTop(sectionGap);
+    
+    // BURST
+    int burstH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing) * 4;
+    drawSectionBox(rightCol.removeFromTop(burstH), "BURST");
+    
+    // Column dividers
+    int mainTop = headerHeight + 8;
+    g.setColour(juce::Colour(0xFF4ADE80).withAlpha(0.3f));
+    g.drawLine((float)columnWidth, (float)mainTop, (float)columnWidth, (float)messagesTop - 4, 1.0f);
+    g.drawLine((float)(columnWidth * 2), (float)mainTop, (float)(columnWidth * 2), (float)messagesTop - 4, 1.0f);
 }
 
 void HP33120APluginAudioProcessorEditor::resized()
 {
-    auto area = getLocalBounds().reduced(10);
-    const int rowHeight = 28;
-    const int labelWidth = 140;
-    const int spacing = 4;
-    const int groupSpacing = 10;
+    // Layout constants
+    const int headerHeight = 32;
+    const int statusBarHeight = 20;
+    const int messagesHeight = 120;
+    const int padding = 8;
     
-    // Connection row
-    int controlWidth = (area.getWidth() - labelWidth - 20) / 2;
-    auto connRow = area.removeFromTop(rowHeight);
-    connectButton.setBounds(connRow.removeFromLeft(100).reduced(2));
-    disconnectButton.setBounds(connRow.removeFromLeft(100).reduced(2));
-    gpibAddressLabel.setBounds(connRow.removeFromLeft(labelWidth).reduced(2));
-    gpibAddressEditor.setBounds(connRow.removeFromLeft(200).reduced(2));
-    idnLabel.setBounds(connRow.removeFromLeft(250).reduced(2));
-    midiStatusLabel.setBounds(connRow.reduced(2));
-    area.removeFromTop(groupSpacing);
+    const int ctrlHeight = 40;  // Height for Slider/Combo "block"
+    const int spacing = 6;
+    const int toggleHeight = 22;
+    const int sectionHeaderPadding = 10;
+    const int sectionGap = 12;
     
-    // Basic Settings
-    int basicHeight = rowHeight * 7 + spacing * 6 + 20;
-    basicGroup.setBounds(area.removeFromTop(basicHeight));
-    auto basicArea = basicGroup.getBounds().reduced(10, 25);
+    auto area = getLocalBounds();
     
-    auto row0 = basicArea.removeFromTop(rowHeight);
-    waveformLabel.setBounds(row0.removeFromLeft(labelWidth).reduced(2));
-    waveformCombo.setBounds(row0.removeFromLeft(controlWidth).reduced(2));
-    basicArea.removeFromTop(spacing);
+    // Hide group components
+    basicGroup.setVisible(false);
+    amfmGroup.setVisible(false);
+    fskGroup.setVisible(false);
+    advGroup.setVisible(false);
     
-    auto row1 = basicArea.removeFromTop(rowHeight);
-    frequencyLabel.setBounds(row1.removeFromLeft(labelWidth).reduced(2));
-    frequencySlider.setBounds(row1.reduced(2));
-    basicArea.removeFromTop(spacing);
+    // ============================================
+    // HEADER BAR
+    // ============================================
+    auto headerArea = area.removeFromTop(headerHeight);
     
-    auto row2 = basicArea.removeFromTop(rowHeight);
-    amplitudeLabel.setBounds(row2.removeFromLeft(labelWidth).reduced(2));
-    amplitudeSlider.setBounds(row2.reduced(2));
-    basicArea.removeFromTop(spacing);
+    // Right side: Connection controls
+    auto connRight = headerArea.removeFromRight(450); 
+    connectButton.setBounds(connRight.removeFromLeft(90).reduced(2));
+    disconnectButton.setBounds(connRight.removeFromLeft(100).reduced(2));
+    gpibAddressEditor.setBounds(connRight.removeFromLeft(140).reduced(2));
+    midiStatusLabel.setBounds(connRight.reduced(2));
     
-    auto row3 = basicArea.removeFromTop(rowHeight);
-    offsetLabel.setBounds(row3.removeFromLeft(labelWidth).reduced(2));
-    offsetSlider.setBounds(row3.reduced(2));
-    basicArea.removeFromTop(spacing);
+    // IDN label - Moved further right to avoid title overlap
+    idnLabel.setBounds(headerArea.withTrimmedLeft(350).reduced(2)); 
+    gpibAddressLabel.setBounds(0, 0, 0, 0);
     
-    auto row4 = basicArea.removeFromTop(rowHeight);
-    phaseLabel.setBounds(row4.removeFromLeft(labelWidth).reduced(2));
-    phaseSlider.setBounds(row4.reduced(2));
-    basicArea.removeFromTop(spacing);
+    // ============================================
+    // STATUS & MESSAGES (Bottom)
+    // ============================================
+    auto statusBarArea = area.removeFromBottom(statusBarHeight);
+    outputToggle.setBounds(statusBarArea.removeFromLeft(100).reduced(2));
     
-    auto row5 = basicArea.removeFromTop(rowHeight);
-    dutyCycleLabel.setBounds(row5.removeFromLeft(labelWidth).reduced(2));
-    dutyCycleSlider.setBounds(row5.reduced(2));
-    basicArea.removeFromTop(spacing);
+    auto messagesArea = area.removeFromBottom(messagesHeight);
+    statusBox.setBounds(messagesArea.reduced(padding, 20).withTrimmedTop(4));
     
-    auto row6 = basicArea.removeFromTop(rowHeight);
-    outputToggle.setBounds(row6.removeFromLeft(labelWidth + controlWidth).reduced(2));
+    // ============================================
+    // MAIN COLUMNS
+    // ============================================
+    // area now contains the middle main section
+    area.removeFromTop(8); // Top margin
+    area.removeFromBottom(4); // Bottom margin above messages
     
-    area.removeFromTop(groupSpacing);
+    int columnWidth = getWidth() / 3; // Use absolute width for columns
+    // We use a separate rectangle for columns to ensure alignment
+    auto mainColumns = juce::Rectangle<int>(0, headerHeight + 8, getWidth(), messagesArea.getY() - (headerHeight + 8) - 4);
     
-    // AM/FM
-    int amfmHeight = rowHeight * 6 + spacing * 5 + 25;
-    amfmGroup.setBounds(area.removeFromTop(amfmHeight));
-    auto amfmArea = amfmGroup.getBounds().reduced(10, 25);
+    // Helpers
+    auto layoutSlider = [&](juce::Label& label, juce::Slider& slider, juce::Rectangle<int>& container) {
+        auto row = container.removeFromTop(ctrlHeight);
+        label.setBounds(row.removeFromTop(14));
+        slider.setBounds(row);
+        container.removeFromTop(spacing);
+    };
     
-    auto amRow0 = amfmArea.removeFromTop(rowHeight);
-    amEnabledToggle.setBounds(amRow0.removeFromLeft(80).reduced(2));
-    amDepthLabel.setBounds(amRow0.removeFromLeft(labelWidth - 80 + spacing).reduced(2));
-    amDepthSlider.setBounds(amRow0.removeFromLeft(controlWidth).reduced(2));
-    amSourceLabel.setBounds(amRow0.removeFromLeft(labelWidth).reduced(2));
-    amSourceCombo.setBounds(amRow0.removeFromLeft(100).reduced(2));
-    amfmArea.removeFromTop(spacing);
+    auto layoutCombo = [&](juce::Label& label, juce::ComboBox& combo, juce::Rectangle<int>& container) {
+        auto row = container.removeFromTop(ctrlHeight);
+        label.setBounds(row.removeFromTop(14));
+        combo.setBounds(row.removeFromTop(22)); // Combo height
+        container.removeFromTop(spacing);
+    };
     
-    auto amRow1 = amfmArea.removeFromTop(rowHeight);
-    amIntWaveformLabel.setBounds(amRow1.removeFromLeft(labelWidth).reduced(2));
-    amIntWaveformCombo.setBounds(amRow1.removeFromLeft(controlWidth).reduced(2));
-    amIntFreqLabel.setBounds(amRow1.removeFromLeft(labelWidth).reduced(2));
-    amIntFreqSlider.setBounds(amRow1.reduced(2));
-    amfmArea.removeFromTop(spacing);
+    auto layoutToggle = [&](juce::ToggleButton& toggle, juce::Rectangle<int>& container) {
+        toggle.setBounds(container.removeFromTop(toggleHeight));
+        container.removeFromTop(spacing);
+    };
     
-    auto fmRow0 = amfmArea.removeFromTop(rowHeight);
-    fmEnabledToggle.setBounds(fmRow0.removeFromLeft(80).reduced(2));
-    fmDevLabel.setBounds(fmRow0.removeFromLeft(labelWidth - 80 + spacing).reduced(2));
-    fmDevSlider.setBounds(fmRow0.removeFromLeft(controlWidth).reduced(2));
-    fmSourceLabel.setBounds(fmRow0.removeFromLeft(labelWidth).reduced(2));
-    fmSourceCombo.setBounds(fmRow0.removeFromLeft(100).reduced(2));
-    amfmArea.removeFromTop(spacing);
+    // --- LEFT COLUMN ---
+    auto leftCol = mainColumns.removeFromLeft(columnWidth).reduced(padding, 0);
     
-    auto fmRow1 = amfmArea.removeFromTop(rowHeight);
-    fmIntWaveformLabel.setBounds(fmRow1.removeFromLeft(labelWidth).reduced(2));
-    fmIntWaveformCombo.setBounds(fmRow1.removeFromLeft(controlWidth).reduced(2));
-    fmIntFreqLabel.setBounds(fmRow1.removeFromLeft(labelWidth).reduced(2));
-    fmIntFreqSlider.setBounds(fmRow1.reduced(2));
+    // SIGNAL GENERATOR
+    // Height match paint(): sectionHeaderPadding*2 + (ctrlHeight+spacing)*6
+    int sigGenH = sectionHeaderPadding * 2 + (ctrlHeight + spacing) * 6;
+    auto sigGenArea = leftCol.removeFromTop(sigGenH);
+    sigGenArea.removeFromTop(sectionHeaderPadding); // Inner padding
+    sigGenArea.removeFromBottom(sectionHeaderPadding);
     
-    area.removeFromTop(groupSpacing);
+    layoutCombo(waveformLabel, waveformCombo, sigGenArea);
+    layoutSlider(frequencyLabel, frequencySlider, sigGenArea);
+    layoutSlider(amplitudeLabel, amplitudeSlider, sigGenArea);
+    layoutSlider(offsetLabel, offsetSlider, sigGenArea);
+    layoutSlider(phaseLabel, phaseSlider, sigGenArea);
+    layoutSlider(dutyCycleLabel, dutyCycleSlider, sigGenArea);
     
-    // FSK
-    int fskHeight = rowHeight * 2 + spacing + 20;
-    fskGroup.setBounds(area.removeFromTop(fskHeight));
-    auto fskArea = fskGroup.getBounds().reduced(10, 25);
+    leftCol.removeFromTop(sectionGap);
     
-    auto fskRow0 = fskArea.removeFromTop(rowHeight);
-    fskEnabledToggle.setBounds(fskRow0.removeFromLeft(80).reduced(2));
-    fskFreqLabel.setBounds(fskRow0.removeFromLeft(labelWidth).reduced(2));
-    fskFreqSlider.setBounds(fskRow0.reduced(2));
-    fskArea.removeFromTop(spacing);
+    // SYNC OUTPUT
+    int syncH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing);
+    auto syncArea = leftCol.removeFromTop(syncH);
+    syncArea.removeFromTop(sectionHeaderPadding);
+    syncArea.removeFromBottom(sectionHeaderPadding);
     
-    auto fskRow1 = fskArea.removeFromTop(rowHeight);
-    fskSourceLabel.setBounds(fskRow1.removeFromLeft(labelWidth).reduced(2));
-    fskSourceCombo.setBounds(fskRow1.removeFromLeft(100).reduced(2));
-    fskRateLabel.setBounds(fskRow1.removeFromLeft(labelWidth).reduced(2));
-    fskRateSlider.setBounds(fskRow1.reduced(2));
+    layoutToggle(syncEnabledToggle, syncArea);
+    layoutSlider(syncPhaseLabel, syncPhaseSlider, syncArea);
     
-    area.removeFromTop(groupSpacing);
+    leftCol.removeFromTop(sectionGap);
     
-    // Advanced (includes 4 ARB slots: each takes rowHeight * 2 + spacing)
-    int arbSlotsHeight = 4 * (rowHeight * 2 + spacing) + spacing;  // 4 slots + spacing between
-    int advHeight = rowHeight * 6 + spacing * 5 + 20 + arbSlotsHeight;
-    advGroup.setBounds(area.removeFromTop(advHeight));
-    auto advArea = advGroup.getBounds().reduced(10, 25);
+    // ARB WAVEFORMS
+    int arbSlotH = 85; 
+    int arbH = sectionHeaderPadding * 2 + (arbSlotH + 8) * 4; 
+    auto arbArea = leftCol.removeFromTop(arbH);
+    arbArea.removeFromTop(sectionHeaderPadding);
     
-    auto sweepRow0 = advArea.removeFromTop(rowHeight);
-    sweepEnabledToggle.setBounds(sweepRow0.removeFromLeft(80).reduced(2));
-    sweepStartLabel.setBounds(sweepRow0.removeFromLeft(labelWidth).reduced(2));
-    sweepStartSlider.setBounds(sweepRow0.removeFromLeft(controlWidth).reduced(2));
-    sweepStopLabel.setBounds(sweepRow0.removeFromLeft(labelWidth).reduced(2));
-    sweepStopSlider.setBounds(sweepRow0.reduced(2));
-    advArea.removeFromTop(spacing);
-    
-    auto sweepRow1 = advArea.removeFromTop(rowHeight);
-    sweepTimeLabel.setBounds(sweepRow1.removeFromLeft(labelWidth).reduced(2));
-    sweepTimeSlider.setBounds(sweepRow1.reduced(2));
-    advArea.removeFromTop(spacing);
-    
-    auto burstRow0 = advArea.removeFromTop(rowHeight);
-    burstEnabledToggle.setBounds(burstRow0.removeFromLeft(80).reduced(2));
-    burstCyclesLabel.setBounds(burstRow0.removeFromLeft(labelWidth).reduced(2));
-    burstCyclesSlider.setBounds(burstRow0.removeFromLeft(controlWidth).reduced(2));
-    burstPhaseLabel.setBounds(burstRow0.removeFromLeft(labelWidth).reduced(2));
-    burstPhaseSlider.setBounds(burstRow0.reduced(2));
-    advArea.removeFromTop(spacing);
-    
-    auto burstRow1 = advArea.removeFromTop(rowHeight);
-    burstIntPeriodLabel.setBounds(burstRow1.removeFromLeft(labelWidth).reduced(2));
-    burstIntPeriodSlider.setBounds(burstRow1.removeFromLeft(controlWidth).reduced(2));
-    burstSourceLabel.setBounds(burstRow1.removeFromLeft(labelWidth).reduced(2));
-    burstSourceCombo.setBounds(burstRow1.removeFromLeft(100).reduced(2));
-    advArea.removeFromTop(spacing);
-    
-    auto syncRow = advArea.removeFromTop(rowHeight);
-    syncEnabledToggle.setBounds(syncRow.removeFromLeft(80).reduced(2));
-    syncPhaseLabel.setBounds(syncRow.removeFromLeft(labelWidth).reduced(2));
-    syncPhaseSlider.setBounds(syncRow.reduced(2));
-    advArea.removeFromTop(spacing);
-    
-    // ARB Slots (4 slots in vertical layout)
-    int arbSlotHeight = rowHeight * 2 + spacing;
     for (int i = 0; i < 4; ++i)
     {
-        auto slotArea = advArea.removeFromTop(arbSlotHeight);
-        arbSlotUIs[i].bounds = slotArea;  // Store bounds for drag-and-drop detection
-        auto slotRow1 = slotArea.removeFromTop(rowHeight);
-        arbSlotUIs[i].nameEditor.setBounds(slotRow1.removeFromLeft(120).reduced(2));
-        arbSlotUIs[i].pointsLabel.setBounds(slotRow1.removeFromLeft(60).reduced(2));
-        arbSlotUIs[i].pointsSlider.setBounds(slotRow1.removeFromLeft(200).reduced(2));
-        arbSlotUIs[i].loadButton.setBounds(slotRow1.removeFromLeft(100).reduced(2));
-        arbSlotUIs[i].uploadButton.setBounds(slotRow1.removeFromLeft(80).reduced(2));
-        arbSlotUIs[i].deleteButton.setBounds(slotRow1.removeFromLeft(80).reduced(2));
+        auto slotArea = arbArea.removeFromTop(arbSlotH);
+        arbArea.removeFromTop(8); // Spacing between slots
         
-        auto slotRow2 = slotArea.removeFromTop(rowHeight);
-        arbSlotUIs[i].fileNameLabel.setBounds(slotRow2.removeFromLeft(300).reduced(2));
-        arbSlotUIs[i].statusLabel.setBounds(slotRow2.reduced(2));
+        arbSlotUIs[i].bounds = slotArea;
         
-        advArea.removeFromTop(spacing);
+        // Row 1: Name (100px) | Points Label (50px) | Points Slider (Rest)
+        auto row1 = slotArea.removeFromTop(26);
+        arbSlotUIs[i].nameEditor.setBounds(row1.removeFromLeft(100).reduced(1));
+        
+        // Points sub-section
+        auto pointsArea = row1; // Remaining width
+        arbSlotUIs[i].pointsLabel.setBounds(pointsArea.removeFromLeft(50).reduced(0, 4)); // Center vertically roughly
+        arbSlotUIs[i].pointsSlider.setBounds(pointsArea.reduced(1));
+        
+        slotArea.removeFromTop(2);
+        
+        // Row 2: Buttons
+        auto row2 = slotArea.removeFromTop(26);
+        int btnW = row2.getWidth() / 3;
+        arbSlotUIs[i].loadButton.setBounds(row2.removeFromLeft(btnW).reduced(1));
+        arbSlotUIs[i].uploadButton.setBounds(row2.removeFromLeft(btnW).reduced(1));
+        arbSlotUIs[i].deleteButton.setBounds(row2.reduced(1));
+        
+        slotArea.removeFromTop(2);
+        
+        // Row 3: Status / File
+        auto row3 = slotArea.removeFromTop(20);
+        arbSlotUIs[i].statusLabel.setBounds(row3.removeFromRight(120).reduced(1));
+        arbSlotUIs[i].fileNameLabel.setBounds(row3.reduced(1));
     }
     
-    auto triggerRow = advArea.removeFromTop(rowHeight);
-    triggerSourceLabel.setBounds(triggerRow.removeFromLeft(labelWidth).reduced(2));
-    triggerSourceCombo.setBounds(triggerRow.reduced(2));
+    // --- MIDDLE COLUMN ---
+    auto midCol = mainColumns.removeFromLeft(columnWidth).reduced(padding, 0);
     
-    area.removeFromTop(groupSpacing);
-    statusBox.setBounds(area.reduced(2));
+    // AM MODULATION
+    int amH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing) * 4;
+    auto amArea = midCol.removeFromTop(amH);
+    amArea.removeFromTop(sectionHeaderPadding);
+    amArea.removeFromBottom(sectionHeaderPadding);
+    
+    layoutToggle(amEnabledToggle, amArea);
+    layoutSlider(amDepthLabel, amDepthSlider, amArea);
+    layoutCombo(amSourceLabel, amSourceCombo, amArea);
+    layoutCombo(amIntWaveformLabel, amIntWaveformCombo, amArea);
+    layoutSlider(amIntFreqLabel, amIntFreqSlider, amArea);
+    
+    midCol.removeFromTop(sectionGap);
+    
+    // FM MODULATION
+    int fmH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing) * 4;
+    auto fmArea = midCol.removeFromTop(fmH);
+    fmArea.removeFromTop(sectionHeaderPadding);
+    fmArea.removeFromBottom(sectionHeaderPadding);
+    
+    layoutToggle(fmEnabledToggle, fmArea);
+    layoutSlider(fmDevLabel, fmDevSlider, fmArea);
+    layoutCombo(fmSourceLabel, fmSourceCombo, fmArea);
+    layoutCombo(fmIntWaveformLabel, fmIntWaveformCombo, fmArea);
+    layoutSlider(fmIntFreqLabel, fmIntFreqSlider, fmArea);
+    
+    midCol.removeFromTop(sectionGap);
+    
+    // FSK MODULATION
+    int fskH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing) * 1;
+    auto fskArea = midCol.removeFromTop(fskH);
+    fskArea.removeFromTop(sectionHeaderPadding);
+    fskArea.removeFromBottom(sectionHeaderPadding);
+    
+    layoutToggle(fskEnabledToggle, fskArea);
+    layoutSlider(fskFreqLabel, fskFreqSlider, fskArea);
+    
+    // Hide unused
+    fskSourceLabel.setBounds(0, 0, 0, 0); fskSourceCombo.setBounds(0, 0, 0, 0);
+    fskRateLabel.setBounds(0, 0, 0, 0); fskRateSlider.setBounds(0, 0, 0, 0);
+    
+    // --- RIGHT COLUMN ---
+    auto rightCol = mainColumns.removeFromLeft(columnWidth).reduced(padding, 0);
+    
+    // SWEEP
+    int sweepH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing) * 3;
+    auto sweepArea = rightCol.removeFromTop(sweepH);
+    sweepArea.removeFromTop(sectionHeaderPadding);
+    sweepArea.removeFromBottom(sectionHeaderPadding);
+    
+    layoutToggle(sweepEnabledToggle, sweepArea);
+    layoutSlider(sweepStartLabel, sweepStartSlider, sweepArea);
+    layoutSlider(sweepStopLabel, sweepStopSlider, sweepArea);
+    layoutSlider(sweepTimeLabel, sweepTimeSlider, sweepArea);
+    
+    rightCol.removeFromTop(sectionGap);
+    
+    // BURST
+    int burstH = sectionHeaderPadding * 2 + (toggleHeight + spacing) + (ctrlHeight + spacing) * 4;
+    auto burstArea = rightCol.removeFromTop(burstH);
+    burstArea.removeFromTop(sectionHeaderPadding);
+    burstArea.removeFromBottom(sectionHeaderPadding);
+    
+    layoutToggle(burstEnabledToggle, burstArea);
+    layoutSlider(burstCyclesLabel, burstCyclesSlider, burstArea);
+    layoutSlider(burstPhaseLabel, burstPhaseSlider, burstArea);
+    layoutCombo(burstSourceLabel, burstSourceCombo, burstArea);
+    layoutSlider(burstIntPeriodLabel, burstIntPeriodSlider, burstArea);
+    
+    // Hide unused
+    triggerSourceLabel.setBounds(0, 0, 0, 0); triggerSourceCombo.setBounds(0, 0, 0, 0);
 }
 
 // PERFORMANCE: Timer runs at 100ms (10 Hz) - only for UI updates, not device communication
@@ -1174,8 +1481,7 @@ void HP33120APluginAudioProcessorEditor::refreshWaveformComboBox()
     // Store current selection
     int currentWaveformSelection = waveformCombo.getSelectedId();
     
-    // ComboBox doesn't have removeItem, so we need to rebuild
-    // First, collect all ARB names
+    // Collect all ARB names from slots
     juce::StringArray arbNames;
     for (int i = 0; i < 4; ++i)
     {
@@ -1197,33 +1503,33 @@ void HP33120APluginAudioProcessorEditor::refreshWaveformComboBox()
         arbNames.add(arbName);
     }
     
-    // Remove existing ARB items by checking if they exist and rebuilding
-    // Since we can't remove individual items, we'll just add new ones
-    // (duplicates won't be added if IDs match, but we need to avoid duplicates)
-    // Actually, let's just add them - if they already exist with the same ID, JUCE will handle it
+    // Clear and rebuild the combo box to avoid stale/duplicate entries
+    // Save built-in items
+    waveformCombo.clear(juce::dontSendNotification);
+    
+    // Re-add built-in waveforms
+    waveformCombo.addItem("SIN", 1);
+    waveformCombo.addItem("SQU", 2);
+    waveformCombo.addItem("TRI", 3);
+    waveformCombo.addItem("RAMP", 4);
+    waveformCombo.addItem("NOIS", 5);
+    waveformCombo.addItem("DC", 6);
+    waveformCombo.addItem("USER", 7);
+    
+    // Add ARB waveforms from slots (IDs 8-11)
     for (int i = 0; i < arbNames.size(); ++i)
     {
-        // Check if this ARB already exists
-        int existingIndex = waveformCombo.indexOfItemId(8 + i);
-        if (existingIndex >= 0)
-        {
-            // Update the text if it changed
-            if (waveformCombo.getItemText(existingIndex) != arbNames[i])
-            {
-                waveformCombo.changeItemText(8 + i, arbNames[i]);
-            }
-        }
-        else
-        {
-            // Add new ARB item
-            waveformCombo.addItem(arbNames[i], 8 + i);
-        }
+        waveformCombo.addItem(arbNames[i], 8 + i);
     }
     
     // Restore selection if it's still valid
     if (waveformCombo.indexOfItemId(currentWaveformSelection) >= 0)
     {
         waveformCombo.setSelectedId(currentWaveformSelection, juce::dontSendNotification);
+    }
+    else
+    {
+        waveformCombo.setSelectedId(1, juce::dontSendNotification);  // Default to SIN
     }
 }
 

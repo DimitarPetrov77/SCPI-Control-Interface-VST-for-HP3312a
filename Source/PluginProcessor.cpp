@@ -24,14 +24,16 @@ HP33120APluginAudioProcessor::HP33120APluginAudioProcessor()
 #endif
     parameters(*this, nullptr, juce::Identifier("HP33120AParameters"),
         {
-            // (Parameter definitions omitted for brevity - they are unchanged)
+            // Connection
             std::make_unique<juce::AudioParameterFloat>(Parameters::GPIB_ADDRESS, "GPIB Address", 0.0f, 30.0f, 10.0f),
+            
+            // Basic Settings - HP33120A: 100 µHz to 15 MHz (sine/square)
             std::make_unique<juce::AudioParameterChoice>(Parameters::WAVEFORM, "Waveform", 
                 juce::StringArray("SIN", "SQU", "TRI", "RAMP", "NOIS", "DC", "USER"), 0),
             std::make_unique<juce::AudioParameterFloat>(Parameters::FREQUENCY, "Frequency", 
-                juce::NormalisableRange<float>(1.0f, 20e6f, 0.0f, 0.3f), 1000.0f),
+                juce::NormalisableRange<float>(0.0001f, 15e6f, 0.0f, 0.25f), 1000.0f),
             std::make_unique<juce::AudioParameterFloat>(Parameters::AMPLITUDE, "Amplitude", 
-                juce::NormalisableRange<float>(0.01f, 10.0f), 1.0f),
+                juce::NormalisableRange<float>(0.01f, 10.0f, 0.0f, 0.5f), 1.0f),
             std::make_unique<juce::AudioParameterFloat>(Parameters::OFFSET, "Offset", 
                 juce::NormalisableRange<float>(-5.0f, 5.0f), 0.0f),
             std::make_unique<juce::AudioParameterFloat>(Parameters::PHASE, "Phase", 
@@ -39,12 +41,72 @@ HP33120APluginAudioProcessor::HP33120APluginAudioProcessor()
             std::make_unique<juce::AudioParameterFloat>(Parameters::DUTY_CYCLE, "Duty Cycle", 
                 juce::NormalisableRange<float>(0.1f, 99.9f), 50.0f),
             std::make_unique<juce::AudioParameterBool>(Parameters::OUTPUT_ENABLED, "Output Enabled", false),
+            
+            // AM Parameters - Full DAW automation
+            std::make_unique<juce::AudioParameterBool>(Parameters::AM_ENABLED, "AM Enabled", false),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::AM_DEPTH, "AM Depth",
+                juce::NormalisableRange<float>(0.0f, 120.0f), 50.0f),
+            std::make_unique<juce::AudioParameterChoice>(Parameters::AM_SOURCE, "AM Source",
+                juce::StringArray("BOTH", "EXT"), 0),
+            std::make_unique<juce::AudioParameterChoice>(Parameters::AM_INT_WAVEFORM, "AM Int Waveform",
+                juce::StringArray("SIN", "SQU", "TRI", "RAMP", "NOIS", "USER"), 0),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::AM_INT_FREQ, "AM Int Frequency",
+                juce::NormalisableRange<float>(0.01f, 20000.0f, 0.0f, 0.3f), 100.0f),
+            
+            // FM Parameters - Full DAW automation
+            std::make_unique<juce::AudioParameterBool>(Parameters::FM_ENABLED, "FM Enabled", false),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::FM_DEVIATION, "FM Deviation",
+                juce::NormalisableRange<float>(0.01f, 7.5e6f, 0.0f, 0.25f), 100.0f),
+            std::make_unique<juce::AudioParameterChoice>(Parameters::FM_SOURCE, "FM Source",
+                juce::StringArray("INT", "EXT"), 0),
+            std::make_unique<juce::AudioParameterChoice>(Parameters::FM_INT_WAVEFORM, "FM Int Waveform",
+                juce::StringArray("SIN", "SQU", "TRI", "RAMP", "NOIS", "USER"), 0),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::FM_INT_FREQ, "FM Int Frequency",
+                juce::NormalisableRange<float>(0.01f, 10000.0f, 0.0f, 0.3f), 10.0f),
+            
+            // FSK Parameters - Full DAW automation
+            std::make_unique<juce::AudioParameterBool>(Parameters::FSK_ENABLED, "FSK Enabled", false),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::FSK_FREQUENCY, "FSK Frequency",
+                juce::NormalisableRange<float>(0.0001f, 15e6f, 0.0f, 0.25f), 100.0f),
+            std::make_unique<juce::AudioParameterChoice>(Parameters::FSK_SOURCE, "FSK Source",
+                juce::StringArray("INT", "EXT"), 0),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::FSK_RATE, "FSK Rate",
+                juce::NormalisableRange<float>(0.01f, 50000.0f, 0.0f, 0.3f), 10.0f),
+            
+            // Sweep Parameters - Full DAW automation
+            std::make_unique<juce::AudioParameterBool>(Parameters::SWEEP_ENABLED, "Sweep Enabled", false),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::SWEEP_START, "Sweep Start",
+                juce::NormalisableRange<float>(0.0001f, 15e6f, 0.0f, 0.25f), 100.0f),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::SWEEP_STOP, "Sweep Stop",
+                juce::NormalisableRange<float>(0.0001f, 15e6f, 0.0f, 0.25f), 10000.0f),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::SWEEP_TIME, "Sweep Time",
+                juce::NormalisableRange<float>(0.001f, 3600.0f, 0.0f, 0.3f), 1.0f),
+            
+            // Burst Parameters - Full DAW automation
+            std::make_unique<juce::AudioParameterBool>(Parameters::BURST_ENABLED, "Burst Enabled", false),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::BURST_CYCLES, "Burst Cycles",
+                juce::NormalisableRange<float>(1.0f, 50000.0f, 1.0f), 1.0f),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::BURST_PHASE, "Burst Phase",
+                juce::NormalisableRange<float>(-360.0f, 360.0f), 0.0f),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::BURST_INT_PERIOD, "Burst Int Period",
+                juce::NormalisableRange<float>(1e-6f, 3600.0f, 0.0f, 0.3f), 0.1f),
+            std::make_unique<juce::AudioParameterChoice>(Parameters::BURST_SOURCE, "Burst Source",
+                juce::StringArray("INT", "EXT"), 0),
+            
+            // Sync Parameters - Full DAW automation
+            std::make_unique<juce::AudioParameterBool>(Parameters::SYNC_ENABLED, "Sync Enabled", false),
+            std::make_unique<juce::AudioParameterFloat>(Parameters::SYNC_PHASE, "Sync Phase",
+                juce::NormalisableRange<float>(0.0f, 360.0f), 0.0f),
+            
+            // Trigger Parameters
+            std::make_unique<juce::AudioParameterChoice>(Parameters::TRIGGER_SOURCE, "Trigger Source",
+                juce::StringArray("IMM", "EXT", "BUS"), 0),
+            
             // ARB Slot Parameters (4 slots)
             std::make_unique<juce::AudioParameterInt>(Parameters::ARB_SLOT1_POINTS, "ARB Slot 1 Points", 8, 16000, 1024),
             std::make_unique<juce::AudioParameterInt>(Parameters::ARB_SLOT2_POINTS, "ARB Slot 2 Points", 8, 16000, 1024),
             std::make_unique<juce::AudioParameterInt>(Parameters::ARB_SLOT3_POINTS, "ARB Slot 3 Points", 8, 16000, 1024),
-            std::make_unique<juce::AudioParameterInt>(Parameters::ARB_SLOT4_POINTS, "ARB Slot 4 Points", 8, 16000, 1024),
-            // ... other params ...
+            std::make_unique<juce::AudioParameterInt>(Parameters::ARB_SLOT4_POINTS, "ARB Slot 4 Points", 8, 16000, 1024)
         })
 {
     // Parameter value references
