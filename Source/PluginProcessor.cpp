@@ -123,12 +123,57 @@ HP33120APluginAudioProcessor::HP33120APluginAudioProcessor()
     arbManager = std::make_unique<ARBManager>(device);
     
     // Add parameter listener to handle automation/LFO changes
+    // This enables full DAW automation for ALL device parameters
     parameterListener = std::make_unique<ParameterListener>(*this);
+    
+    // Basic parameters
+    parameters.addParameterListener(Parameters::WAVEFORM, parameterListener.get());
     parameters.addParameterListener(Parameters::FREQUENCY, parameterListener.get());
     parameters.addParameterListener(Parameters::AMPLITUDE, parameterListener.get());
     parameters.addParameterListener(Parameters::OFFSET, parameterListener.get());
     parameters.addParameterListener(Parameters::PHASE, parameterListener.get());
     parameters.addParameterListener(Parameters::DUTY_CYCLE, parameterListener.get());
+    parameters.addParameterListener(Parameters::OUTPUT_ENABLED, parameterListener.get());
+    
+    // AM parameters
+    parameters.addParameterListener(Parameters::AM_ENABLED, parameterListener.get());
+    parameters.addParameterListener(Parameters::AM_DEPTH, parameterListener.get());
+    parameters.addParameterListener(Parameters::AM_SOURCE, parameterListener.get());
+    parameters.addParameterListener(Parameters::AM_INT_WAVEFORM, parameterListener.get());
+    parameters.addParameterListener(Parameters::AM_INT_FREQ, parameterListener.get());
+    
+    // FM parameters
+    parameters.addParameterListener(Parameters::FM_ENABLED, parameterListener.get());
+    parameters.addParameterListener(Parameters::FM_DEVIATION, parameterListener.get());
+    parameters.addParameterListener(Parameters::FM_SOURCE, parameterListener.get());
+    parameters.addParameterListener(Parameters::FM_INT_WAVEFORM, parameterListener.get());
+    parameters.addParameterListener(Parameters::FM_INT_FREQ, parameterListener.get());
+    
+    // FSK parameters
+    parameters.addParameterListener(Parameters::FSK_ENABLED, parameterListener.get());
+    parameters.addParameterListener(Parameters::FSK_FREQUENCY, parameterListener.get());
+    parameters.addParameterListener(Parameters::FSK_SOURCE, parameterListener.get());
+    parameters.addParameterListener(Parameters::FSK_RATE, parameterListener.get());
+    
+    // Sweep parameters
+    parameters.addParameterListener(Parameters::SWEEP_ENABLED, parameterListener.get());
+    parameters.addParameterListener(Parameters::SWEEP_START, parameterListener.get());
+    parameters.addParameterListener(Parameters::SWEEP_STOP, parameterListener.get());
+    parameters.addParameterListener(Parameters::SWEEP_TIME, parameterListener.get());
+    
+    // Burst parameters
+    parameters.addParameterListener(Parameters::BURST_ENABLED, parameterListener.get());
+    parameters.addParameterListener(Parameters::BURST_CYCLES, parameterListener.get());
+    parameters.addParameterListener(Parameters::BURST_PHASE, parameterListener.get());
+    parameters.addParameterListener(Parameters::BURST_INT_PERIOD, parameterListener.get());
+    parameters.addParameterListener(Parameters::BURST_SOURCE, parameterListener.get());
+    
+    // Sync parameters
+    parameters.addParameterListener(Parameters::SYNC_ENABLED, parameterListener.get());
+    parameters.addParameterListener(Parameters::SYNC_PHASE, parameterListener.get());
+    
+    // Trigger parameters
+    parameters.addParameterListener(Parameters::TRIGGER_SOURCE, parameterListener.get());
 }
 
 HP33120APluginAudioProcessor::~HP33120APluginAudioProcessor()
@@ -325,6 +370,55 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new HP33120APl
 //==============================================================================
 // Background Thread Implementation for Non-Blocking Device Communication
 //==============================================================================
+
+// Helper function to convert waveform index to SCPI string
+static const char* waveformIndexToString(int index)
+{
+    static const char* waveforms[] = {"SIN", "SQU", "TRI", "RAMP", "NOIS", "DC", "USER"};
+    if (index >= 0 && index < 7) return waveforms[index];
+    return "SIN";
+}
+
+// Helper for AM/FM internal waveforms (no DC option)
+static const char* modWaveformIndexToString(int index)
+{
+    static const char* waveforms[] = {"SIN", "SQU", "TRI", "RAMP", "NOIS", "USER"};
+    if (index >= 0 && index < 6) return waveforms[index];
+    return "SIN";
+}
+
+// Helper for AM source
+static const char* amSourceIndexToString(int index)
+{
+    static const char* sources[] = {"BOTH", "EXT"};
+    if (index >= 0 && index < 2) return sources[index];
+    return "BOTH";
+}
+
+// Helper for FM/FSK source
+static const char* fmFskSourceIndexToString(int index)
+{
+    static const char* sources[] = {"INT", "EXT"};
+    if (index >= 0 && index < 2) return sources[index];
+    return "INT";
+}
+
+// Helper for Burst source
+static const char* burstSourceIndexToString(int index)
+{
+    static const char* sources[] = {"INT", "EXT"};
+    if (index >= 0 && index < 2) return sources[index];
+    return "INT";
+}
+
+// Helper for Trigger source
+static const char* triggerSourceIndexToString(int index)
+{
+    static const char* sources[] = {"IMM", "EXT", "BUS"};
+    if (index >= 0 && index < 3) return sources[index];
+    return "IMM";
+}
+
 void HP33120APluginAudioProcessor::DeviceCommandThread::run()
 {
     while (!threadShouldExit())
@@ -334,7 +428,21 @@ void HP33120APluginAudioProcessor::DeviceCommandThread::run()
         
         if (!device.isConnected()) continue;
         
-        // Process all pending parameter updates
+        // ==================== BASIC PARAMETERS ====================
+        if (hasPendingWaveform.load())
+        {
+            int wfIndex = pendingWaveform.load();
+            hasPendingWaveform = false;
+            device.setWaveform(waveformIndexToString(wfIndex));
+        }
+        
+        if (hasPendingOutput.load())
+        {
+            bool enabled = pendingOutput.load();
+            hasPendingOutput = false;
+            device.setOutputEnabled(enabled);
+        }
+        
         if (hasPendingFreq.load())
         {
             double freq = pendingFreq.load();
@@ -368,6 +476,195 @@ void HP33120APluginAudioProcessor::DeviceCommandThread::run()
             double duty = pendingDuty.load();
             hasPendingDuty = false;
             device.setDutyCycle(duty);
+        }
+        
+        // ==================== AM PARAMETERS ====================
+        if (hasPendingAMEnabled.load())
+        {
+            bool enabled = pendingAMEnabled.load();
+            hasPendingAMEnabled = false;
+            device.setAMEnabled(enabled);
+        }
+        
+        if (hasPendingAMDepth.load())
+        {
+            double depth = pendingAMDepth.load();
+            hasPendingAMDepth = false;
+            device.setAMDepth(depth);
+        }
+        
+        if (hasPendingAMSource.load())
+        {
+            int sourceIdx = pendingAMSource.load();
+            hasPendingAMSource = false;
+            device.setAMSource(amSourceIndexToString(sourceIdx));
+        }
+        
+        if (hasPendingAMIntWaveform.load())
+        {
+            int wfIdx = pendingAMIntWaveform.load();
+            hasPendingAMIntWaveform = false;
+            device.setAMInternalWaveform(modWaveformIndexToString(wfIdx));
+        }
+        
+        if (hasPendingAMIntFreq.load())
+        {
+            double freq = pendingAMIntFreq.load();
+            hasPendingAMIntFreq = false;
+            device.setAMInternalFrequency(freq);
+        }
+        
+        // ==================== FM PARAMETERS ====================
+        if (hasPendingFMEnabled.load())
+        {
+            bool enabled = pendingFMEnabled.load();
+            hasPendingFMEnabled = false;
+            device.setFMEnabled(enabled);
+        }
+        
+        if (hasPendingFMDeviation.load())
+        {
+            double dev = pendingFMDeviation.load();
+            hasPendingFMDeviation = false;
+            device.setFMDeviation(dev);
+        }
+        
+        if (hasPendingFMSource.load())
+        {
+            int sourceIdx = pendingFMSource.load();
+            hasPendingFMSource = false;
+            device.setFMSource(fmFskSourceIndexToString(sourceIdx));
+        }
+        
+        if (hasPendingFMIntWaveform.load())
+        {
+            int wfIdx = pendingFMIntWaveform.load();
+            hasPendingFMIntWaveform = false;
+            device.setFMInternalWaveform(modWaveformIndexToString(wfIdx));
+        }
+        
+        if (hasPendingFMIntFreq.load())
+        {
+            double freq = pendingFMIntFreq.load();
+            hasPendingFMIntFreq = false;
+            device.setFMInternalFrequency(freq);
+        }
+        
+        // ==================== FSK PARAMETERS ====================
+        if (hasPendingFSKEnabled.load())
+        {
+            bool enabled = pendingFSKEnabled.load();
+            hasPendingFSKEnabled = false;
+            device.setFSKEnabled(enabled);
+        }
+        
+        if (hasPendingFSKFrequency.load())
+        {
+            double freq = pendingFSKFrequency.load();
+            hasPendingFSKFrequency = false;
+            device.setFSKFrequency(freq);
+        }
+        
+        if (hasPendingFSKSource.load())
+        {
+            int sourceIdx = pendingFSKSource.load();
+            hasPendingFSKSource = false;
+            device.setFSKSource(fmFskSourceIndexToString(sourceIdx));
+        }
+        
+        if (hasPendingFSKRate.load())
+        {
+            double rate = pendingFSKRate.load();
+            hasPendingFSKRate = false;
+            device.setFSKInternalRate(rate);
+        }
+        
+        // ==================== SWEEP PARAMETERS ====================
+        if (hasPendingSweepEnabled.load())
+        {
+            bool enabled = pendingSweepEnabled.load();
+            hasPendingSweepEnabled = false;
+            device.setSweepEnabled(enabled);
+        }
+        
+        if (hasPendingSweepStart.load())
+        {
+            double freq = pendingSweepStart.load();
+            hasPendingSweepStart = false;
+            device.setSweepStartFreq(freq);
+        }
+        
+        if (hasPendingSweepStop.load())
+        {
+            double freq = pendingSweepStop.load();
+            hasPendingSweepStop = false;
+            device.setSweepStopFreq(freq);
+        }
+        
+        if (hasPendingSweepTime.load())
+        {
+            double time = pendingSweepTime.load();
+            hasPendingSweepTime = false;
+            device.setSweepTime(time);
+        }
+        
+        // ==================== BURST PARAMETERS ====================
+        if (hasPendingBurstEnabled.load())
+        {
+            bool enabled = pendingBurstEnabled.load();
+            hasPendingBurstEnabled = false;
+            device.setBurstEnabled(enabled);
+        }
+        
+        if (hasPendingBurstCycles.load())
+        {
+            int cycles = pendingBurstCycles.load();
+            hasPendingBurstCycles = false;
+            device.setBurstCycles(cycles);
+        }
+        
+        if (hasPendingBurstPhase.load())
+        {
+            double phase = pendingBurstPhase.load();
+            hasPendingBurstPhase = false;
+            device.setBurstPhase(phase);
+        }
+        
+        if (hasPendingBurstIntPeriod.load())
+        {
+            double period = pendingBurstIntPeriod.load();
+            hasPendingBurstIntPeriod = false;
+            device.setBurstInternalPeriod(period);
+        }
+        
+        if (hasPendingBurstSource.load())
+        {
+            int sourceIdx = pendingBurstSource.load();
+            hasPendingBurstSource = false;
+            device.setBurstSource(burstSourceIndexToString(sourceIdx));
+        }
+        
+        // ==================== SYNC PARAMETERS ====================
+        if (hasPendingSyncEnabled.load())
+        {
+            bool enabled = pendingSyncEnabled.load();
+            hasPendingSyncEnabled = false;
+            device.setSyncEnabled(enabled);
+        }
+        
+        if (hasPendingSyncPhase.load())
+        {
+            double phase = pendingSyncPhase.load();
+            hasPendingSyncPhase = false;
+            device.setSyncPhase(phase);
+        }
+        
+        // ==================== TRIGGER PARAMETERS ====================
+        if (hasPendingTriggerSource.load())
+        {
+            int sourceIdx = pendingTriggerSource.load();
+            hasPendingTriggerSource = false;
+            device.setTriggerSource(triggerSourceIndexToString(sourceIdx));
         }
         
         // Periodic error checking - catches errors from writeFast() calls
@@ -435,6 +732,209 @@ void HP33120APluginAudioProcessor::DeviceCommandThread::queueDutyCycleUpdate(dou
     commandPending.signal();
 }
 
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueWaveformUpdate(int waveformIndex)
+{
+    pendingWaveform = waveformIndex;
+    hasPendingWaveform = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueOutputUpdate(bool enabled)
+{
+    pendingOutput = enabled;
+    hasPendingOutput = true;
+    commandPending.signal();
+}
+
+// ==================== AM QUEUE METHODS ====================
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueAMEnabledUpdate(bool enabled)
+{
+    pendingAMEnabled = enabled;
+    hasPendingAMEnabled = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueAMDepthUpdate(double depth)
+{
+    pendingAMDepth = depth;
+    hasPendingAMDepth = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueAMSourceUpdate(int sourceIndex)
+{
+    pendingAMSource = sourceIndex;
+    hasPendingAMSource = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueAMIntWaveformUpdate(int waveformIndex)
+{
+    pendingAMIntWaveform = waveformIndex;
+    hasPendingAMIntWaveform = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueAMIntFreqUpdate(double freq)
+{
+    pendingAMIntFreq = freq;
+    hasPendingAMIntFreq = true;
+    commandPending.signal();
+}
+
+// ==================== FM QUEUE METHODS ====================
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueFMEnabledUpdate(bool enabled)
+{
+    pendingFMEnabled = enabled;
+    hasPendingFMEnabled = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueFMDeviationUpdate(double deviation)
+{
+    pendingFMDeviation = deviation;
+    hasPendingFMDeviation = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueFMSourceUpdate(int sourceIndex)
+{
+    pendingFMSource = sourceIndex;
+    hasPendingFMSource = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueFMIntWaveformUpdate(int waveformIndex)
+{
+    pendingFMIntWaveform = waveformIndex;
+    hasPendingFMIntWaveform = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueFMIntFreqUpdate(double freq)
+{
+    pendingFMIntFreq = freq;
+    hasPendingFMIntFreq = true;
+    commandPending.signal();
+}
+
+// ==================== FSK QUEUE METHODS ====================
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueFSKEnabledUpdate(bool enabled)
+{
+    pendingFSKEnabled = enabled;
+    hasPendingFSKEnabled = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueFSKFrequencyUpdate(double freq)
+{
+    pendingFSKFrequency = freq;
+    hasPendingFSKFrequency = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueFSKSourceUpdate(int sourceIndex)
+{
+    pendingFSKSource = sourceIndex;
+    hasPendingFSKSource = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueFSKRateUpdate(double rate)
+{
+    pendingFSKRate = rate;
+    hasPendingFSKRate = true;
+    commandPending.signal();
+}
+
+// ==================== SWEEP QUEUE METHODS ====================
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueSweepEnabledUpdate(bool enabled)
+{
+    pendingSweepEnabled = enabled;
+    hasPendingSweepEnabled = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueSweepStartUpdate(double freq)
+{
+    pendingSweepStart = freq;
+    hasPendingSweepStart = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueSweepStopUpdate(double freq)
+{
+    pendingSweepStop = freq;
+    hasPendingSweepStop = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueSweepTimeUpdate(double time)
+{
+    pendingSweepTime = time;
+    hasPendingSweepTime = true;
+    commandPending.signal();
+}
+
+// ==================== BURST QUEUE METHODS ====================
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueBurstEnabledUpdate(bool enabled)
+{
+    pendingBurstEnabled = enabled;
+    hasPendingBurstEnabled = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueBurstCyclesUpdate(int cycles)
+{
+    pendingBurstCycles = cycles;
+    hasPendingBurstCycles = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueBurstPhaseUpdate(double phase)
+{
+    pendingBurstPhase = phase;
+    hasPendingBurstPhase = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueBurstIntPeriodUpdate(double period)
+{
+    pendingBurstIntPeriod = period;
+    hasPendingBurstIntPeriod = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueBurstSourceUpdate(int sourceIndex)
+{
+    pendingBurstSource = sourceIndex;
+    hasPendingBurstSource = true;
+    commandPending.signal();
+}
+
+// ==================== SYNC QUEUE METHODS ====================
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueSyncEnabledUpdate(bool enabled)
+{
+    pendingSyncEnabled = enabled;
+    hasPendingSyncEnabled = true;
+    commandPending.signal();
+}
+
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueSyncPhaseUpdate(double phase)
+{
+    pendingSyncPhase = phase;
+    hasPendingSyncPhase = true;
+    commandPending.signal();
+}
+
+// ==================== TRIGGER QUEUE METHODS ====================
+void HP33120APluginAudioProcessor::DeviceCommandThread::queueTriggerSourceUpdate(int sourceIndex)
+{
+    pendingTriggerSource = sourceIndex;
+    hasPendingTriggerSource = true;
+    commandPending.signal();
+}
+
 void HP33120APluginAudioProcessor::DeviceCommandThread::stopThreadSafely()
 {
     signalThreadShouldExit();
@@ -445,6 +945,7 @@ void HP33120APluginAudioProcessor::DeviceCommandThread::stopThreadSafely()
 //==============================================================================
 // Parameter Listener Implementation for Automation/LFO
 // Throttles updates to 20 Hz (50ms) like the Python version for smooth operation
+// Enables full DAW automation for ALL device parameters
 //==============================================================================
 void HP33120APluginAudioProcessor::ParameterListener::parameterChanged(const juce::String& parameterID, float newValue)
 {
@@ -465,14 +966,23 @@ void HP33120APluginAudioProcessor::ParameterListener::parameterChanged(const juc
     // Without throttling, automation at 48kHz = 48,000 calls/second = device overload!
     // With throttling: Max 20 calls/second = smooth operation
     // Strategy: Only queue updates at throttled rate, skipping intermediate values
-    if (parameterID == Parameters::FREQUENCY)
+    
+    // ==================== BASIC PARAMETERS ====================
+    if (parameterID == Parameters::WAVEFORM)
+    {
+        if (currentTime - lastWaveformUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastWaveformUpdate = currentTime;
+            cmdThread->queueWaveformUpdate((int)newValue);
+        }
+    }
+    else if (parameterID == Parameters::FREQUENCY)
     {
         if (currentTime - lastFreqUpdate >= UPDATE_INTERVAL_MS)
         {
             lastFreqUpdate = currentTime;
             cmdThread->queueFrequencyUpdate((double)newValue);
         }
-        // PERFORMANCE: If throttled, we skip this update (expected - prevents spam)
     }
     else if (parameterID == Parameters::AMPLITUDE)
     {
@@ -506,5 +1016,228 @@ void HP33120APluginAudioProcessor::ParameterListener::parameterChanged(const juc
             cmdThread->queueDutyCycleUpdate((double)newValue);
         }
     }
-    // PERFORMANCE: No else clause needed - unknown parameters are ignored (fast path)
+    else if (parameterID == Parameters::OUTPUT_ENABLED)
+    {
+        if (currentTime - lastOutputUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastOutputUpdate = currentTime;
+            cmdThread->queueOutputUpdate(newValue > 0.5f);
+        }
+    }
+    // ==================== AM PARAMETERS ====================
+    else if (parameterID == Parameters::AM_ENABLED)
+    {
+        if (currentTime - lastAMEnabledUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastAMEnabledUpdate = currentTime;
+            cmdThread->queueAMEnabledUpdate(newValue > 0.5f);
+        }
+    }
+    else if (parameterID == Parameters::AM_DEPTH)
+    {
+        if (currentTime - lastAMDepthUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastAMDepthUpdate = currentTime;
+            cmdThread->queueAMDepthUpdate((double)newValue);
+        }
+    }
+    else if (parameterID == Parameters::AM_SOURCE)
+    {
+        if (currentTime - lastAMSourceUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastAMSourceUpdate = currentTime;
+            cmdThread->queueAMSourceUpdate((int)newValue);
+        }
+    }
+    else if (parameterID == Parameters::AM_INT_WAVEFORM)
+    {
+        if (currentTime - lastAMIntWaveformUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastAMIntWaveformUpdate = currentTime;
+            cmdThread->queueAMIntWaveformUpdate((int)newValue);
+        }
+    }
+    else if (parameterID == Parameters::AM_INT_FREQ)
+    {
+        if (currentTime - lastAMIntFreqUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastAMIntFreqUpdate = currentTime;
+            cmdThread->queueAMIntFreqUpdate((double)newValue);
+        }
+    }
+    // ==================== FM PARAMETERS ====================
+    else if (parameterID == Parameters::FM_ENABLED)
+    {
+        if (currentTime - lastFMEnabledUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastFMEnabledUpdate = currentTime;
+            cmdThread->queueFMEnabledUpdate(newValue > 0.5f);
+        }
+    }
+    else if (parameterID == Parameters::FM_DEVIATION)
+    {
+        if (currentTime - lastFMDeviationUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastFMDeviationUpdate = currentTime;
+            cmdThread->queueFMDeviationUpdate((double)newValue);
+        }
+    }
+    else if (parameterID == Parameters::FM_SOURCE)
+    {
+        if (currentTime - lastFMSourceUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastFMSourceUpdate = currentTime;
+            cmdThread->queueFMSourceUpdate((int)newValue);
+        }
+    }
+    else if (parameterID == Parameters::FM_INT_WAVEFORM)
+    {
+        if (currentTime - lastFMIntWaveformUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastFMIntWaveformUpdate = currentTime;
+            cmdThread->queueFMIntWaveformUpdate((int)newValue);
+        }
+    }
+    else if (parameterID == Parameters::FM_INT_FREQ)
+    {
+        if (currentTime - lastFMIntFreqUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastFMIntFreqUpdate = currentTime;
+            cmdThread->queueFMIntFreqUpdate((double)newValue);
+        }
+    }
+    // ==================== FSK PARAMETERS ====================
+    else if (parameterID == Parameters::FSK_ENABLED)
+    {
+        if (currentTime - lastFSKEnabledUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastFSKEnabledUpdate = currentTime;
+            cmdThread->queueFSKEnabledUpdate(newValue > 0.5f);
+        }
+    }
+    else if (parameterID == Parameters::FSK_FREQUENCY)
+    {
+        if (currentTime - lastFSKFrequencyUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastFSKFrequencyUpdate = currentTime;
+            cmdThread->queueFSKFrequencyUpdate((double)newValue);
+        }
+    }
+    else if (parameterID == Parameters::FSK_SOURCE)
+    {
+        if (currentTime - lastFSKSourceUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastFSKSourceUpdate = currentTime;
+            cmdThread->queueFSKSourceUpdate((int)newValue);
+        }
+    }
+    else if (parameterID == Parameters::FSK_RATE)
+    {
+        if (currentTime - lastFSKRateUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastFSKRateUpdate = currentTime;
+            cmdThread->queueFSKRateUpdate((double)newValue);
+        }
+    }
+    // ==================== SWEEP PARAMETERS ====================
+    else if (parameterID == Parameters::SWEEP_ENABLED)
+    {
+        if (currentTime - lastSweepEnabledUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastSweepEnabledUpdate = currentTime;
+            cmdThread->queueSweepEnabledUpdate(newValue > 0.5f);
+        }
+    }
+    else if (parameterID == Parameters::SWEEP_START)
+    {
+        if (currentTime - lastSweepStartUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastSweepStartUpdate = currentTime;
+            cmdThread->queueSweepStartUpdate((double)newValue);
+        }
+    }
+    else if (parameterID == Parameters::SWEEP_STOP)
+    {
+        if (currentTime - lastSweepStopUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastSweepStopUpdate = currentTime;
+            cmdThread->queueSweepStopUpdate((double)newValue);
+        }
+    }
+    else if (parameterID == Parameters::SWEEP_TIME)
+    {
+        if (currentTime - lastSweepTimeUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastSweepTimeUpdate = currentTime;
+            cmdThread->queueSweepTimeUpdate((double)newValue);
+        }
+    }
+    // ==================== BURST PARAMETERS ====================
+    else if (parameterID == Parameters::BURST_ENABLED)
+    {
+        if (currentTime - lastBurstEnabledUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastBurstEnabledUpdate = currentTime;
+            cmdThread->queueBurstEnabledUpdate(newValue > 0.5f);
+        }
+    }
+    else if (parameterID == Parameters::BURST_CYCLES)
+    {
+        if (currentTime - lastBurstCyclesUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastBurstCyclesUpdate = currentTime;
+            cmdThread->queueBurstCyclesUpdate((int)newValue);
+        }
+    }
+    else if (parameterID == Parameters::BURST_PHASE)
+    {
+        if (currentTime - lastBurstPhaseUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastBurstPhaseUpdate = currentTime;
+            cmdThread->queueBurstPhaseUpdate((double)newValue);
+        }
+    }
+    else if (parameterID == Parameters::BURST_INT_PERIOD)
+    {
+        if (currentTime - lastBurstIntPeriodUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastBurstIntPeriodUpdate = currentTime;
+            cmdThread->queueBurstIntPeriodUpdate((double)newValue);
+        }
+    }
+    else if (parameterID == Parameters::BURST_SOURCE)
+    {
+        if (currentTime - lastBurstSourceUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastBurstSourceUpdate = currentTime;
+            cmdThread->queueBurstSourceUpdate((int)newValue);
+        }
+    }
+    // ==================== SYNC PARAMETERS ====================
+    else if (parameterID == Parameters::SYNC_ENABLED)
+    {
+        if (currentTime - lastSyncEnabledUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastSyncEnabledUpdate = currentTime;
+            cmdThread->queueSyncEnabledUpdate(newValue > 0.5f);
+        }
+    }
+    else if (parameterID == Parameters::SYNC_PHASE)
+    {
+        if (currentTime - lastSyncPhaseUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastSyncPhaseUpdate = currentTime;
+            cmdThread->queueSyncPhaseUpdate((double)newValue);
+        }
+    }
+    // ==================== TRIGGER PARAMETERS ====================
+    else if (parameterID == Parameters::TRIGGER_SOURCE)
+    {
+        if (currentTime - lastTriggerSourceUpdate >= UPDATE_INTERVAL_MS)
+        {
+            lastTriggerSourceUpdate = currentTime;
+            cmdThread->queueTriggerSourceUpdate((int)newValue);
+        }
+    }
+    // PERFORMANCE: Other parameters are ignored (fast path)
 }

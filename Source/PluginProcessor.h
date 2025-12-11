@@ -143,16 +143,63 @@ private:
     public:
         DeviceCommandThread(HP33120ADriver& dev) : Thread("DeviceCommandThread"), device(dev) {}
         void run() override;
+        
+        // Basic parameters
         void queueFrequencyUpdate(double freq);
         void queueAmplitudeUpdate(double amp);
         void queueOffsetUpdate(double offset);
         void queuePhaseUpdate(double phase);
         void queueDutyCycleUpdate(double duty);
+        void queueWaveformUpdate(int waveformIndex);
+        void queueOutputUpdate(bool enabled);
+        
+        // AM parameters
+        void queueAMEnabledUpdate(bool enabled);
+        void queueAMDepthUpdate(double depth);
+        void queueAMSourceUpdate(int sourceIndex);
+        void queueAMIntWaveformUpdate(int waveformIndex);
+        void queueAMIntFreqUpdate(double freq);
+        
+        // FM parameters
+        void queueFMEnabledUpdate(bool enabled);
+        void queueFMDeviationUpdate(double deviation);
+        void queueFMSourceUpdate(int sourceIndex);
+        void queueFMIntWaveformUpdate(int waveformIndex);
+        void queueFMIntFreqUpdate(double freq);
+        
+        // FSK parameters
+        void queueFSKEnabledUpdate(bool enabled);
+        void queueFSKFrequencyUpdate(double freq);
+        void queueFSKSourceUpdate(int sourceIndex);
+        void queueFSKRateUpdate(double rate);
+        
+        // Sweep parameters
+        void queueSweepEnabledUpdate(bool enabled);
+        void queueSweepStartUpdate(double freq);
+        void queueSweepStopUpdate(double freq);
+        void queueSweepTimeUpdate(double time);
+        
+        // Burst parameters
+        void queueBurstEnabledUpdate(bool enabled);
+        void queueBurstCyclesUpdate(int cycles);
+        void queueBurstPhaseUpdate(double phase);
+        void queueBurstIntPeriodUpdate(double period);
+        void queueBurstSourceUpdate(int sourceIndex);
+        
+        // Sync parameters
+        void queueSyncEnabledUpdate(bool enabled);
+        void queueSyncPhaseUpdate(double phase);
+        
+        // Trigger parameters
+        void queueTriggerSourceUpdate(int sourceIndex);
+        
         void stopThreadSafely();
         
     private:
         HP33120ADriver& device;
         juce::WaitableEvent commandPending;
+        
+        // Basic parameters
         std::atomic<double> pendingFreq{0.0};
         std::atomic<bool> hasPendingFreq{false};
         std::atomic<double> pendingAmp{0.0};
@@ -163,6 +210,76 @@ private:
         std::atomic<bool> hasPendingPhase{false};
         std::atomic<double> pendingDuty{0.0};
         std::atomic<bool> hasPendingDuty{false};
+        std::atomic<int> pendingWaveform{0};
+        std::atomic<bool> hasPendingWaveform{false};
+        std::atomic<bool> pendingOutput{false};
+        std::atomic<bool> hasPendingOutput{false};
+        
+        // AM parameters
+        std::atomic<bool> pendingAMEnabled{false};
+        std::atomic<bool> hasPendingAMEnabled{false};
+        std::atomic<double> pendingAMDepth{50.0};
+        std::atomic<bool> hasPendingAMDepth{false};
+        std::atomic<int> pendingAMSource{0};
+        std::atomic<bool> hasPendingAMSource{false};
+        std::atomic<int> pendingAMIntWaveform{0};
+        std::atomic<bool> hasPendingAMIntWaveform{false};
+        std::atomic<double> pendingAMIntFreq{100.0};
+        std::atomic<bool> hasPendingAMIntFreq{false};
+        
+        // FM parameters
+        std::atomic<bool> pendingFMEnabled{false};
+        std::atomic<bool> hasPendingFMEnabled{false};
+        std::atomic<double> pendingFMDeviation{100.0};
+        std::atomic<bool> hasPendingFMDeviation{false};
+        std::atomic<int> pendingFMSource{0};
+        std::atomic<bool> hasPendingFMSource{false};
+        std::atomic<int> pendingFMIntWaveform{0};
+        std::atomic<bool> hasPendingFMIntWaveform{false};
+        std::atomic<double> pendingFMIntFreq{10.0};
+        std::atomic<bool> hasPendingFMIntFreq{false};
+        
+        // FSK parameters
+        std::atomic<bool> pendingFSKEnabled{false};
+        std::atomic<bool> hasPendingFSKEnabled{false};
+        std::atomic<double> pendingFSKFrequency{100.0};
+        std::atomic<bool> hasPendingFSKFrequency{false};
+        std::atomic<int> pendingFSKSource{0};
+        std::atomic<bool> hasPendingFSKSource{false};
+        std::atomic<double> pendingFSKRate{10.0};
+        std::atomic<bool> hasPendingFSKRate{false};
+        
+        // Sweep parameters
+        std::atomic<bool> pendingSweepEnabled{false};
+        std::atomic<bool> hasPendingSweepEnabled{false};
+        std::atomic<double> pendingSweepStart{100.0};
+        std::atomic<bool> hasPendingSweepStart{false};
+        std::atomic<double> pendingSweepStop{10000.0};
+        std::atomic<bool> hasPendingSweepStop{false};
+        std::atomic<double> pendingSweepTime{1.0};
+        std::atomic<bool> hasPendingSweepTime{false};
+        
+        // Burst parameters
+        std::atomic<bool> pendingBurstEnabled{false};
+        std::atomic<bool> hasPendingBurstEnabled{false};
+        std::atomic<int> pendingBurstCycles{1};
+        std::atomic<bool> hasPendingBurstCycles{false};
+        std::atomic<double> pendingBurstPhase{0.0};
+        std::atomic<bool> hasPendingBurstPhase{false};
+        std::atomic<double> pendingBurstIntPeriod{0.1};
+        std::atomic<bool> hasPendingBurstIntPeriod{false};
+        std::atomic<int> pendingBurstSource{0};
+        std::atomic<bool> hasPendingBurstSource{false};
+        
+        // Sync parameters
+        std::atomic<bool> pendingSyncEnabled{false};
+        std::atomic<bool> hasPendingSyncEnabled{false};
+        std::atomic<double> pendingSyncPhase{0.0};
+        std::atomic<bool> hasPendingSyncPhase{false};
+        
+        // Trigger parameters
+        std::atomic<int> pendingTriggerSource{0};
+        std::atomic<bool> hasPendingTriggerSource{false};
         
         // Periodic error checking - check every 500ms to catch errors from writeFast()
         juce::int64 lastErrorCheck{0};
@@ -178,11 +295,56 @@ private:
         void parameterChanged(const juce::String& parameterID, float newValue) override;
     private:
         HP33120APluginAudioProcessor& processor;
+        
+        // Throttle timestamps for all parameters
         juce::int64 lastFreqUpdate = 0;
         juce::int64 lastAmpUpdate = 0;
         juce::int64 lastOffsetUpdate = 0;
         juce::int64 lastPhaseUpdate = 0;
         juce::int64 lastDutyUpdate = 0;
+        juce::int64 lastWaveformUpdate = 0;
+        juce::int64 lastOutputUpdate = 0;
+        
+        // AM
+        juce::int64 lastAMEnabledUpdate = 0;
+        juce::int64 lastAMDepthUpdate = 0;
+        juce::int64 lastAMSourceUpdate = 0;
+        juce::int64 lastAMIntWaveformUpdate = 0;
+        juce::int64 lastAMIntFreqUpdate = 0;
+        
+        // FM
+        juce::int64 lastFMEnabledUpdate = 0;
+        juce::int64 lastFMDeviationUpdate = 0;
+        juce::int64 lastFMSourceUpdate = 0;
+        juce::int64 lastFMIntWaveformUpdate = 0;
+        juce::int64 lastFMIntFreqUpdate = 0;
+        
+        // FSK
+        juce::int64 lastFSKEnabledUpdate = 0;
+        juce::int64 lastFSKFrequencyUpdate = 0;
+        juce::int64 lastFSKSourceUpdate = 0;
+        juce::int64 lastFSKRateUpdate = 0;
+        
+        // Sweep
+        juce::int64 lastSweepEnabledUpdate = 0;
+        juce::int64 lastSweepStartUpdate = 0;
+        juce::int64 lastSweepStopUpdate = 0;
+        juce::int64 lastSweepTimeUpdate = 0;
+        
+        // Burst
+        juce::int64 lastBurstEnabledUpdate = 0;
+        juce::int64 lastBurstCyclesUpdate = 0;
+        juce::int64 lastBurstPhaseUpdate = 0;
+        juce::int64 lastBurstIntPeriodUpdate = 0;
+        juce::int64 lastBurstSourceUpdate = 0;
+        
+        // Sync
+        juce::int64 lastSyncEnabledUpdate = 0;
+        juce::int64 lastSyncPhaseUpdate = 0;
+        
+        // Trigger
+        juce::int64 lastTriggerSourceUpdate = 0;
+        
         static constexpr int UPDATE_INTERVAL_MS = 20; // 50 Hz max update rate for smooth operation
     };
     
